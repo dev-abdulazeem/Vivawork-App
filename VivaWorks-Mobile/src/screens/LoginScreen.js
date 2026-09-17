@@ -7,22 +7,27 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/Input';
 import Button from '../components/Button';
+
+// Import your custom brand icons from your local folder
+import { Logo, GoogleIcon, AppleIcon } from '../components/icons';
+
+// Import clean, professional UI icons from lucide-react-native
 import {
-  Logo,
-  GoogleIcon,
-  AppleIcon,
-  MailIcon,
-  LockIcon,
-  CheckIcon,
-} from '../components/icons';
-import Eye from '../components/icons/Eye';
-import EyeOff from '../components/icons/EyeOff';
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  X,
+  Check,
+} from 'lucide-react-native';
 
 const LoginScreen = ({ navigation }) => {
   const { login } = useAuth();
@@ -33,35 +38,102 @@ const LoginScreen = ({ navigation }) => {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
 
-  const validate = () => {
-    const newErrors = {};
-
-    if (!email) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Please enter a valid email address';
+  const clearFieldError = (field) => {
+    if (errors[field]) {
+      setErrors((prev) => ({ ...prev, [field]: null }));
     }
+  };
 
-    if (!password) {
-      newErrors.password = 'Password is required';
-    } else if (password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
-    }
+  const validateEmail = (value) => {
+    if (!value) return 'Email is required';
+    if (!/\S+@\S+\.\S+/.test(value)) return 'Please enter a valid email address';
+    return null;
+  };
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+  const validatePassword = (value) => {
+    if (!value) return 'Password is required';
+    if (value.length < 6) return 'Password must be at least 6 characters';
+    return null;
+  };
+
+  const handleEmailBlur = () => {
+    const error = validateEmail(email);
+    if (error) setErrors((prev) => ({ ...prev, email: error }));
+  };
+
+  const handlePasswordBlur = () => {
+    const error = validatePassword(password);
+    if (error) setErrors((prev) => ({ ...prev, password: error }));
   };
 
   const handleLogin = async () => {
-    if (!validate()) return;
+    // 1. Client-side validation
+    const emailError = validateEmail(email);
+    const passwordError = validatePassword(password);
+
+    if (emailError || passwordError) {
+      setErrors({ email: emailError, password: passwordError });
+      return; // Stop execution
+    }
 
     setIsLoading(true);
-    const result = await login(email, password);
-    setIsLoading(false);
+    setErrors({});
 
-    if (!result.success) {
-      setErrors({ general: result.error });
+    try {
+      const result = await login(email, password);
+      
+      // 2. Robust Error Handling: Explicitly check for failure
+      if (!result || result.success === false) {
+        const errorCode = result?.code;
+        const errorMessage = result?.error || 'Login failed. Please check your credentials.';
+
+        switch (errorCode) {
+          case 'INVALID_CREDENTIALS':
+          case 'USER_NOT_FOUND':
+            setErrors({ 
+              general: 'Incorrect email or password. Please try again.',
+              password: ' ' // Keeps the password field highlighted as invalid
+            });
+            break;
+          case 'ACCOUNT_LOCKED':
+            setErrors({ general: 'Too many failed attempts. Please try again in 15 minutes.' });
+            break;
+          case 'ACCOUNT_SUSPENDED':
+            setErrors({ general: 'Your account has been suspended. Please contact support.' });
+            break;
+          case 'EMAIL_NOT_VERIFIED':
+            setErrors({ 
+              general: 'Please verify your email before logging in.',
+              email: 'Email not verified'
+            });
+            break;
+          default:
+            setErrors({ general: errorMessage });
+        }
+        
+        // CRITICAL: Return here to prevent any further execution or accidental navigation
+        return; 
+      }
+      
+      // 3. If successful, AuthContext should handle navigation automatically.
+      // We do nothing here to let AuthContext do its job.
+      
+    } catch (error) {
+      console.error('Login error:', error);
+      setErrors({ 
+        general: error.response?.data?.message || 'Network error. Please check your connection and try again.' 
+      });
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  const handleGoogleLogin = () => {
+    Alert.alert('Coming Soon', 'Google Sign-In will be available soon');
+  };
+
+  const handleAppleLogin = () => {
+    Alert.alert('Coming Soon', 'Apple Sign-In will be available soon');
   };
 
   return (
@@ -75,6 +147,7 @@ const LoginScreen = ({ navigation }) => {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Header */}
           <View style={styles.header}>
             <View style={styles.logoContainer}>
               <Logo size={56} />
@@ -83,41 +156,62 @@ const LoginScreen = ({ navigation }) => {
             <Text style={styles.subtitle}>Please enter your details to sign in.</Text>
           </View>
 
+          {/* Form */}
           <View style={styles.form}>
+            {/* General Error Banner */}
             {errors.general && (
               <View style={styles.errorBanner}>
-                <Text style={styles.errorBannerText}>{errors.general}</Text>
+                <AlertCircle size={20} color={COLORS.error || '#EF4444'} style={styles.errorIcon} />
+                <View style={styles.errorTextContainer}>
+                  <Text style={styles.errorBannerTitle}>Login Failed</Text>
+                  <Text style={styles.errorBannerText}>{errors.general}</Text>
+                </View>
+                <TouchableOpacity 
+                  onPress={() => setErrors((prev) => ({ ...prev, general: null }))}
+                  style={styles.errorCloseButton}
+                  activeOpacity={0.7}
+                >
+                  <X size={18} color="#9CA3AF" />
+                </TouchableOpacity>
               </View>
             )}
 
+            {/* Email Input */}
             <Input
               label="Email Address"
               placeholder="name@company.com"
               value={email}
               onChangeText={(text) => {
                 setEmail(text);
-                if (errors.email) setErrors({ ...errors, email: null });
+                clearFieldError('email');
               }}
+              onBlur={handleEmailBlur}
               error={errors.email}
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
-              leftIcon={<MailIcon color={errors.email ? COLORS.error : COLORS.textTertiary} size={20} />}
+              leftIcon={
+                <Mail size={20} color={errors.email ? (COLORS.error || '#EF4444') : (COLORS.textTertiary || '#9CA3AF')} />
+              }
               containerStyle={styles.inputContainer}
             />
 
+            {/* Password Input */}
             <Input
               label="Password"
               placeholder="Enter your password"
               value={password}
               onChangeText={(text) => {
                 setPassword(text);
-                if (errors.password) setErrors({ ...errors, password: null });
+                clearFieldError('password');
               }}
+              onBlur={handlePasswordBlur}
               error={errors.password}
               secureTextEntry={!showPassword}
               autoComplete="password"
-              leftIcon={<LockIcon color={errors.password ? COLORS.error : COLORS.textTertiary} size={20} />}
+              leftIcon={
+                <Lock size={20} color={errors.password ? (COLORS.error || '#EF4444') : (COLORS.textTertiary || '#9CA3AF')} />
+              }
               rightIcon={
                 <TouchableOpacity 
                   onPress={() => setShowPassword(!showPassword)} 
@@ -125,15 +219,16 @@ const LoginScreen = ({ navigation }) => {
                   style={styles.eyeIconContainer}
                 >
                   {showPassword ? (
-                    <EyeOff color={COLORS.textTertiary} size={20} />
+                    <EyeOff size={20} color={COLORS.textTertiary || '#9CA3AF'} />
                   ) : (
-                    <Eye color={COLORS.textTertiary} size={20} />
+                    <Eye size={20} color={COLORS.textTertiary || '#9CA3AF'} />
                   )}
                 </TouchableOpacity>
               }
               containerStyle={styles.inputContainer}
             />
 
+            {/* Options Row */}
             <View style={styles.optionsRow}>
               <TouchableOpacity
                 style={styles.rememberMe}
@@ -141,7 +236,7 @@ const LoginScreen = ({ navigation }) => {
                 activeOpacity={0.7}
               >
                 <View style={[styles.checkbox, rememberMe && styles.checkboxActive]}>
-                  {rememberMe && <CheckIcon color={COLORS.white} size={14} />}
+                  {rememberMe && <Check size={14} color={COLORS.white || '#FFFFFF'} strokeWidth={3} />}
                 </View>
                 <Text style={styles.rememberText}>Remember me</Text>
               </TouchableOpacity>
@@ -154,6 +249,7 @@ const LoginScreen = ({ navigation }) => {
               </TouchableOpacity>
             </View>
 
+            {/* Submit Button */}
             <Button
               title="Sign In"
               onPress={handleLogin}
@@ -164,15 +260,17 @@ const LoginScreen = ({ navigation }) => {
               style={styles.submitButton}
             />
 
+            {/* Divider */}
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
               <Text style={styles.dividerText}>Or continue with</Text>
               <View style={styles.dividerLine} />
             </View>
 
+            {/* Social Buttons */}
             <Button
               title="Continue with Google"
-              onPress={() => {}}
+              onPress={handleGoogleLogin}
               variant="outline"
               size="large"
               icon={<GoogleIcon size={20} />}
@@ -181,7 +279,7 @@ const LoginScreen = ({ navigation }) => {
 
             <Button
               title="Continue with Apple"
-              onPress={() => {}}
+              onPress={handleAppleLogin}
               variant="outline"
               size="large"
               icon={<AppleIcon size={20} />}
@@ -189,8 +287,9 @@ const LoginScreen = ({ navigation }) => {
             />
           </View>
 
+          {/* Footer */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Do not have an account? </Text>
+            <Text style={styles.footerText}>Don't have an account? </Text>
             <TouchableOpacity 
               onPress={() => navigation.navigate('Register')}
               activeOpacity={0.7}
@@ -207,7 +306,7 @@ const LoginScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.white || '#FFFFFF',
   },
   keyboardView: {
     flex: 1,
@@ -220,46 +319,62 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 40,
+    marginTop: 16,
+    marginBottom: 32,
   },
   logoContainer: {
     marginBottom: 24,
   },
   welcomeText: {
-    ...FONTS.h3,
-    color: COLORS.textPrimary,
     fontSize: 28,
-    fontWeight: '700',
+    fontWeight: '800',
+    color: COLORS.textPrimary || '#0F172A',
     letterSpacing: -0.5,
     marginBottom: 8,
   },
   subtitle: {
-    ...FONTS.body1,
-    color: COLORS.textSecondary,
     fontSize: 16,
+    color: COLORS.textSecondary || '#64748B',
     textAlign: 'center',
     lineHeight: 24,
   },
   form: {
     flex: 1,
   },
-  inputContainer: {
-    marginBottom: 20,
-  },
   errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     backgroundColor: '#FEF2F2',
     borderLeftWidth: 4,
     borderLeftColor: COLORS.error || '#EF4444',
     padding: 16,
-    borderRadius: 8,
-    marginBottom: 20,
+    borderRadius: 12,
+    marginBottom: 24,
+  },
+  errorIcon: {
+    marginRight: 12,
+    marginTop: 2,
+  },
+  errorTextContainer: {
+    flex: 1,
+  },
+  errorBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#991B1B',
+    marginBottom: 4,
   },
   errorBannerText: {
-    ...FONTS.body2,
+    fontSize: 14,
     color: COLORS.error || '#B91C1C',
-    textAlign: 'center',
-    fontWeight: '500',
+    lineHeight: 20,
+  },
+  errorCloseButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  inputContainer: {
+    marginBottom: 20,
   },
   optionsRow: {
     flexDirection: 'row',
@@ -281,23 +396,21 @@ const styles = StyleSheet.create({
     marginRight: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.white || '#FFFFFF',
   },
   checkboxActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary || '#2563EB',
+    borderColor: COLORS.primary || '#2563EB',
   },
   rememberText: {
-    ...FONTS.body2,
-    color: COLORS.textSecondary,
     fontSize: 14,
     fontWeight: '500',
+    color: COLORS.textSecondary || '#64748B',
   },
   forgotText: {
-    ...FONTS.body2,
-    color: COLORS.primary,
-    fontWeight: '600',
     fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primary || '#2563EB',
   },
   submitButton: {
     marginTop: 8,
@@ -306,19 +419,18 @@ const styles = StyleSheet.create({
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 32,
+    marginVertical: 28,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: COLORS.border || '#E5E7EB',
+    backgroundColor: COLORS.border || '#E2E8F0',
   },
   dividerText: {
-    ...FONTS.body2,
-    color: COLORS.textTertiary || '#9CA3AF',
-    marginHorizontal: 16,
     fontSize: 13,
     fontWeight: '500',
+    color: COLORS.textTertiary || '#94A3B8',
+    marginHorizontal: 16,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -339,15 +451,13 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   footerText: {
-    ...FONTS.body1,
-    color: COLORS.textSecondary,
     fontSize: 15,
+    color: COLORS.textSecondary || '#64748B',
   },
   footerLink: {
-    ...FONTS.body1,
-    color: COLORS.primary,
-    fontWeight: '700',
     fontSize: 15,
+    color: COLORS.primary || '#2563EB',
+    fontWeight: '700',
   },
 });
 
