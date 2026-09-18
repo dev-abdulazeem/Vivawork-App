@@ -8,129 +8,191 @@ import {
   FlatList,
   RefreshControl,
   TouchableOpacity,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SIZES, FONTS } from '../constants/theme';
 import api from '../utils/api';
 import Header from '../components/Header';
-import Card from '../components/Card';
-import Avatar from '../components/Avatar';
-import Badge from '../components/Badge';
-import Button from '../components/Button';
 import Loading from '../components/Loading';
-import EmptyState from '../components/EmptyState';
+
+import {
+  Mic,
+  Radio,
+  Users,
+  Globe,
+  Lock,
+  UserCheck,
+  Plus,
+  Crown,
+  ArrowLeft,
+} from 'lucide-react-native';
+
+const visibilityIcons = {
+  public: Globe,
+  followers_only: UserCheck,
+  private: Lock,
+};
+
+const visibilityLabels = {
+  public: 'Public',
+  followers_only: 'Followers',
+  private: 'Private',
+};
+
+const getInitials = (firstName, lastName) => {
+  return ((firstName?.[0] || '') + (lastName?.[0] || '')).toUpperCase();
+};
 
 const AudioRoomsScreen = ({ navigation }) => {
   const [rooms, setRooms] = useState([]);
-  const [liveRooms, setLiveRooms] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState('forYou');
+
+  const fetchRooms = useCallback(async (silent = false) => {
+    try {
+      if (!silent) setIsLoading(true);
+      const res = await api.get('/vivarooms/live');
+      const newRooms = res.data.rooms || [];
+      setRooms((prev) => {
+        if (JSON.stringify(prev) !== JSON.stringify(newRooms)) return newRooms;
+        return prev;
+      });
+    } catch (err) {
+      console.error('Failed to fetch rooms:', err);
+    } finally {
+      if (!silent) setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchRooms();
-  }, []);
-
-  const fetchRooms = async () => {
-    try {
-      const [roomsRes, liveRes] = await Promise.all([
-        api.get('/audio-rooms'),
-        api.get('/audio-rooms/live'),
-      ]);
-      setRooms(roomsRes.data || []);
-      setLiveRooms(liveRes.data || []);
-    } catch (error) {
-      console.error('Error fetching rooms:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    const interval = setInterval(() => fetchRooms(true), 5000);
+    return () => clearInterval(interval);
+  }, [fetchRooms]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchRooms();
     setRefreshing(false);
-  }, []);
+  }, [fetchRooms]);
 
-  const renderLiveRoom = ({ item }) => (
-    <Card style={styles.liveRoomCard} onPress={() => navigation.navigate('AudioRoomDetail', { roomId: item._id })}>
-      <View style={styles.liveRoomHeader}>
-        <View style={styles.liveBadge}>
-          <View style={styles.liveDot} />
-          <Text style={styles.liveText}>LIVE</Text>
-        </View>
-        <Text style={styles.liveRoomMembers}>{item.members?.length || 0} listening</Text>
-      </View>
+  const renderRoomCard = ({ item: room }) => {
+    const liveCount = room.participants?.filter((p) => !p.leftAt).length || 0;
+    const speakerCount =
+      room.participants?.filter(
+        (p) => !p.leftAt && (p.role === 'host' || p.role === 'co_host' || p.role === 'speaker')
+      ).length || 0;
 
-      <Text style={styles.liveRoomTitle} numberOfLines={2}>
-        {item.title}
-      </Text>
+    const activeSpeakers =
+      room.participants
+        ?.filter((p) => !p.leftAt && (p.role === 'host' || p.role === 'speaker'))
+        .slice(0, 4) || [];
 
-      <View style={styles.liveRoomSpeakers}>
-        {item.speakers?.slice(0, 4).map((speaker, index) => (
-          <Avatar
-            key={index}
-            source={speaker.avatar}
-            name={speaker.name}
-            size="small"
-            style={{ marginLeft: index > 0 ? -10 : 0 }}
-          />
-        ))}
-        {item.speakers?.length > 4 && (
-          <View style={styles.moreSpeakers}>
-            <Text style={styles.moreSpeakersText}>+{item.speakers.length - 4}</Text>
+    const VisibilityIcon = visibilityIcons[room.visibility] || Globe;
+
+    return (
+      <TouchableOpacity
+        style={styles.roomCard}
+        onPress={() => navigation.navigate('AudioRoomDetail', { roomId: room.id })}
+        activeOpacity={0.8}
+      >
+        {/* Top row: Live badge + visibility */}
+        <View style={styles.cardTopRow}>
+          <View style={styles.liveBadge}>
+            <View style={styles.liveDot} />
+            <Text style={styles.liveBadgeText}>LIVE</Text>
           </View>
-        )}
-      </View>
-
-      <Button
-        title="Join"
-        onPress={() => navigation.navigate('AudioRoomDetail', { roomId: item._id })}
-        variant="primary"
-        size="small"
-        fullWidth={false}
-      />
-    </Card>
-  );
-
-  const renderRoom = ({ item }) => (
-    <Card style={styles.roomCard} onPress={() => navigation.navigate('AudioRoomDetail', { roomId: item._id })}>
-      <View style={styles.roomHeader}>
-        <Avatar
-          source={item.host?.avatar}
-          name={item.host?.name}
-          size="medium"
-        />
-        <View style={styles.roomInfo}>
-          <Text style={styles.roomTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
-          <Text style={styles.roomHost}>
-            {item.host?.name} • {item.members?.length || 0} members
-          </Text>
+          <View style={styles.visibilityBadge}>
+            <VisibilityIcon size={11} color="#9CA3AF" />
+            <Text style={styles.visibilityText}>
+              {visibilityLabels[room.visibility]}
+            </Text>
+          </View>
         </View>
-        {item.isLive ? (
-          <Badge label="Live" variant="error" size="small" dot />
-        ) : (
-          <Badge label="Scheduled" variant="default" size="small" />
-        )}
-      </View>
 
-      {item.description && (
-        <Text style={styles.roomDescription} numberOfLines={2}>
-          {item.description}
+        {/* Title */}
+        <Text style={styles.roomTitle} numberOfLines={1}>
+          {room.title}
         </Text>
-      )}
 
-      <View style={styles.roomTags}>
-        {item.tags?.slice(0, 3).map((tag, index) => (
-          <View key={index} style={styles.roomTag}>
-            <Text style={styles.roomTagText}>{tag}</Text>
+        {/* Description */}
+        {room.description ? (
+          <Text style={styles.roomDescription} numberOfLines={2}>
+            {room.description}
+          </Text>
+        ) : null}
+
+        {/* Host */}
+        <View style={styles.hostRow}>
+          {room.host?.avatar ? (
+            <Image source={{ uri: room.host.avatar }} style={styles.hostAvatar} />
+          ) : (
+            <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
+              <Text style={styles.hostAvatarText}>
+                {getInitials(room.host?.firstName, room.host?.lastName)}
+              </Text>
+            </View>
+          )}
+          <View style={styles.hostInfo}>
+            <Text style={styles.hostName} numberOfLines={1}>
+              {room.host?.firstName} {room.host?.lastName}
+            </Text>
+            <Text style={styles.hostLabel}>Host</Text>
           </View>
-        ))}
-      </View>
-    </Card>
-  );
+        </View>
+
+        {/* Speakers row */}
+        <View style={styles.speakersRow}>
+          <View style={styles.speakerAvatars}>
+            {activeSpeakers.map((p) => (
+              <View key={p.id} style={styles.speakerAvatarWrap}>
+                {p.user?.avatar ? (
+                  <Image source={{ uri: p.user.avatar }} style={styles.speakerAvatar} />
+                ) : (
+                  <View style={[styles.speakerAvatar, styles.speakerAvatarPlaceholder]}>
+                    <Text style={styles.speakerAvatarText}>
+                      {getInitials(p.user?.firstName, p.user?.lastName)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ))}
+            {speakerCount > 4 && (
+              <View style={[styles.speakerAvatar, styles.moreSpeakersBadge]}>
+                <Text style={styles.moreSpeakersText}>+{speakerCount - 4}</Text>
+              </View>
+            )}
+          </View>
+          {speakerCount > 0 && (
+            <View style={styles.speakerCount}>
+              <Mic size={11} color="#059669" />
+              <Text style={styles.speakerCountText}>
+                {speakerCount} {speakerCount === 1 ? 'speaker' : 'speakers'}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Bottom row: listeners + join */}
+        <View style={styles.cardBottomRow}>
+          <View style={styles.listenersCount}>
+            <Users size={14} color="#6B7280" />
+            <Text style={styles.listenersText}>
+              {liveCount} {liveCount === 1 ? 'listening' : 'listening'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.joinButton}
+            onPress={() => navigation.navigate('AudioRoomDetail', { roomId: room.id })}
+            activeOpacity={0.7}
+          >
+            <Radio size={14} color="#fff" />
+            <Text style={styles.joinButtonText}>Join Room</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   if (isLoading) {
     return <Loading.FullScreen text="Loading rooms..." />;
@@ -139,82 +201,45 @@ const AudioRoomsScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <Header
-        title="Audio Rooms"
-        rightIcon={
-          <TouchableOpacity onPress={() => {}}>
-            <Text style={styles.createIcon}>＋</Text>
-          </TouchableOpacity>
-        }
+        title="Live VivaRooms"
+        showBack
+        onBackPress={() => navigation.goBack()}
       />
-
-      {/* Tabs */}
-      <View style={styles.tabsContainer}>
-        {['forYou', 'following', 'trending'].map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.activeTab]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-              {tab === 'forYou' ? 'For You' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
 
       <FlatList
         data={rooms}
-        renderItem={renderRoom}
-        keyExtractor={(item) => item._id || item.id}
+        renderItem={renderRoomCard}
+        keyExtractor={(item) => item.id}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        ListHeaderComponent={
-          <View>
-            {/* Live Now Section */}
-            {liveRooms.length > 0 && (
-              <View>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>🔴 Live Now</Text>
-                </View>
-                <FlatList
-                  horizontal
-                  data={liveRooms}
-                  renderItem={renderLiveRoom}
-                  keyExtractor={(item) => `live-${item._id || item.id}`}
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.liveRoomsList}
-                />
-              </View>
-            )}
-
-            {/* Trending Rooms */}
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Trending Rooms</Text>
-              <TouchableOpacity>
-                <Text style={styles.seeAll}>See all →</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        }
-        ListEmptyComponent={
-          <EmptyState
-            icon="🎙️"
-            title="No rooms yet"
-            message="Be the first to create an audio room!"
-            actionLabel="Create Room"
-            onAction={() => {}}
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#059669"
           />
         }
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          rooms.length === 0 && styles.emptyListContent,
+        ]}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconWrap}>
+              <Radio size={32} color="#9CA3AF" />
+            </View>
+            <Text style={styles.emptyTitle}>No live rooms</Text>
+            <Text style={styles.emptyMessage}>Start the first conversation!</Text>
+          </View>
+        }
       />
 
-      {/* Floating Action Button */}
+      {/* FAB to create room */}
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => {}}
+        onPress={() => navigation.navigate('CreateVivaRoom')}
+        activeOpacity={0.8}
       >
-        <Text style={styles.fabIcon}>🎙️</Text>
+        <Plus size={26} color="#fff" strokeWidth={2.5} />
       </TouchableOpacity>
     </SafeAreaView>
   );
@@ -223,181 +248,254 @@ const AudioRoomsScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.backgroundSecondary,
+    backgroundColor: '#F9FAFB',
   },
-  createIcon: {
-    fontSize: 28,
-    color: COLORS.primary,
+  listContent: {
+    padding: 16,
+    gap: 12,
   },
-  tabsContainer: {
+  emptyListContent: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+
+  // Room Card
+  roomCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+    marginBottom: 12,
+  },
+  cardTopRow: {
     flexDirection: 'row',
-    paddingHorizontal: SIZES.md,
-    paddingVertical: SIZES.sm,
-    backgroundColor: COLORS.white,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.borderLight,
-  },
-  tab: {
-    paddingHorizontal: SIZES.lg,
-    paddingVertical: SIZES.sm,
-    marginRight: SIZES.sm,
-    borderRadius: SIZES.radiusFull,
-  },
-  activeTab: {
-    backgroundColor: COLORS.primary,
-  },
-  tabText: {
-    ...FONTS.body2,
-    color: COLORS.textSecondary,
-  },
-  activeTabText: {
-    color: COLORS.white,
-    fontWeight: '600',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: SIZES.md,
-    marginTop: SIZES.lg,
-    marginBottom: SIZES.md,
-  },
-  sectionTitle: {
-    ...FONTS.h6,
-    color: COLORS.textPrimary,
-  },
-  seeAll: {
-    ...FONTS.body2,
-    color: COLORS.primary,
-  },
-  liveRoomsList: {
-    paddingHorizontal: SIZES.md,
-  },
-  liveRoomCard: {
-    width: 280,
-    marginRight: SIZES.md,
-    backgroundColor: COLORS.primary,
-  },
-  liveRoomHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SIZES.sm,
+    gap: 8,
+    marginBottom: 12,
   },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.error,
-    paddingHorizontal: SIZES.sm,
+    backgroundColor: '#FEF2F2',
+    paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: SIZES.radiusSm,
+    borderRadius: 6,
+    gap: 4,
   },
   liveDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.white,
-    marginRight: 4,
+    backgroundColor: '#EF4444',
   },
-  liveText: {
-    ...FONTS.body3,
-    color: COLORS.white,
+  liveBadgeText: {
+    fontSize: 10,
     fontWeight: '700',
+    color: '#EF4444',
+    letterSpacing: 0.5,
   },
-  liveRoomMembers: {
-    ...FONTS.body3,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  liveRoomTitle: {
-    ...FONTS.h6,
-    color: COLORS.white,
-    marginBottom: SIZES.md,
-    lineHeight: 24,
-  },
-  liveRoomSpeakers: {
+  visibilityBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SIZES.md,
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 4,
   },
-  moreSpeakers: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: -10,
-  },
-  moreSpeakersText: {
-    ...FONTS.body3,
-    color: COLORS.white,
-    fontWeight: '600',
-  },
-  roomCard: {
-    marginHorizontal: SIZES.md,
-    marginBottom: SIZES.md,
-  },
-  roomHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SIZES.sm,
-  },
-  roomInfo: {
-    flex: 1,
-    marginLeft: SIZES.md,
+  visibilityText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#9CA3AF',
   },
   roomTitle: {
-    ...FONTS.h6,
-    color: COLORS.textPrimary,
-  },
-  roomHost: {
-    ...FONTS.body3,
-    color: COLORS.textSecondary,
-    marginTop: 2,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
   },
   roomDescription: {
-    ...FONTS.body2,
-    color: COLORS.textSecondary,
-    lineHeight: 20,
-    marginBottom: SIZES.sm,
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+    marginBottom: 12,
   },
-  roomTags: {
+
+  // Host
+  hostRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  roomTag: {
-    backgroundColor: COLORS.gray100,
-    paddingHorizontal: SIZES.sm,
-    paddingVertical: 4,
-    borderRadius: SIZES.radiusSm,
-    marginRight: SIZES.xs,
-    marginBottom: SIZES.xs,
+  hostAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
   },
-  roomTagText: {
-    ...FONTS.body3,
-    color: COLORS.textSecondary,
+  hostAvatarPlaceholder: {
+    backgroundColor: '#059669',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  listContent: {
-    paddingBottom: 100,
+  hostAvatarText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
   },
+  hostInfo: {
+    marginLeft: 10,
+    flex: 1,
+  },
+  hostName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  hostLabel: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginTop: 1,
+  },
+
+  // Speakers
+  speakersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  speakerAvatars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  speakerAvatarWrap: {
+    marginLeft: -6,
+  },
+  speakerAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  speakerAvatarPlaceholder: {
+    backgroundColor: '#059669',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  speakerAvatarText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  moreSpeakersBadge: {
+    backgroundColor: '#E5E7EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: -6,
+  },
+  moreSpeakersText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#6B7280',
+  },
+  speakerCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  speakerCountText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+
+  // Bottom row
+  cardBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    paddingTop: 12,
+  },
+  listenersCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  listenersText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  joinButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#059669',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6,
+  },
+  joinButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
+  // Empty State
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 6,
+  },
+  emptyMessage: {
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+
+  // FAB
   fab: {
     position: 'absolute',
-    bottom: 100,
-    right: SIZES.lg,
+    bottom: 24,
+    right: 16,
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: COLORS.primary,
+    backgroundColor: '#059669',
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
-  },
-  fabIcon: {
-    fontSize: 24,
+    elevation: 8,
   },
 });
 

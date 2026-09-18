@@ -18,7 +18,6 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import Header from '../components/Header';
@@ -26,6 +25,7 @@ import Card from '../components/Card';
 import Avatar from '../components/Avatar';
 import Button from '../components/Button';
 import Loading from '../components/Loading';
+import VivaRoomSection from '../components/VivaRoomSection';
 
 import {
   Heart,
@@ -50,7 +50,6 @@ import {
   Trash2,
   Volume2,
   VolumeX,
-  Maximize,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -173,7 +172,6 @@ const HomeScreen = ({ navigation }) => {
     const wasLiked = post.isLiked;
     const newLikes = wasLiked ? (post.likes || 1) - 1 : (post.likes || 0) + 1;
 
-    // Optimistic update
     setPosts((prev) =>
       prev.map((p) => (p.id === postId ? { ...p, isLiked: !wasLiked, likes: newLikes } : p))
     );
@@ -181,7 +179,6 @@ const HomeScreen = ({ navigation }) => {
     try {
       await api.post(`/posts/${postId}/like`);
     } catch (err) {
-      // Revert on error
       setPosts((prev) =>
         prev.map((p) => (p.id === postId ? { ...p, isLiked: wasLiked, likes: post.likes || 0 } : p))
       );
@@ -878,20 +875,7 @@ const HomeScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <Header
-        title="Feed"
-        rightIcon={
-          <View style={styles.headerRight}>
-            <TouchableOpacity
-              onPress={() => setShowCreateModal(true)}
-              style={styles.headerButton}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Plus size={24} color="#059669" />
-            </TouchableOpacity>
-          </View>
-        }
-      />
+      <Header title="Feed" />
 
       {error && (
         <View style={styles.errorBanner}>
@@ -916,12 +900,26 @@ const HomeScreen = ({ navigation }) => {
         }
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
-        ListHeaderComponent={renderStories}
+        ListHeaderComponent={
+          <View>
+            {renderStories()}
+            <VivaRoomSection navigation={navigation} />
+          </View>
+        }
         ListFooterComponent={renderFooter}
         ListEmptyComponent={renderEmptyState}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       />
+
+      {/* Floating Action Button — right middle */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => setShowCreateModal(true)}
+        activeOpacity={0.8}
+      >
+        <Plus size={26} color="#fff" strokeWidth={2.5} />
+      </TouchableOpacity>
 
       {renderCreateModal()}
       {renderLightbox()}
@@ -935,13 +933,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB',
   },
 
-  // Header
-  headerRight: {
-    flexDirection: 'row',
+  // Floating Action Button
+  fab: {
+    position: 'absolute',
+    right: 16,
+    top: '50%',
+    marginTop: -28,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#059669',
+    justifyContent: 'center',
     alignItems: 'center',
-  },
-  headerButton: {
-    padding: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 100,
   },
 
   // Error Banner

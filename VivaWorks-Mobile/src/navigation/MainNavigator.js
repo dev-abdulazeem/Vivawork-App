@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, Animated } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
@@ -9,9 +9,10 @@ import { COLORS, SIZES } from '../constants/theme';
 // Tab Screens
 import HomeScreen from '../screens/HomeScreen';
 import JobsScreen from '../screens/JobsScreen';
+import WalletScreen from '../screens/WalletScreen';
+import NetworkScreen from '../screens/NetworkScreen';
 import MessagesScreen from '../screens/MessagesScreen';
-import ProfileScreen from '../screens/ProfileScreen';
-import AudioRoomsScreen from '../screens/AudioRoomsScreen';
+import ProfileScreen from '../screens/ProfileScreen'; // 🎯 Reusing your existing ProfileScreen
 
 // Stack Screens
 import JobDetailScreen from '../screens/JobDetailScreen';
@@ -21,14 +22,15 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import SearchScreen from '../screens/SearchScreen';
+import AudioRoomsScreen from '../screens/AudioRoomsScreen';
 import AudioRoomDetailScreen from '../screens/AudioRoomDetailScreen';
-import WalletScreen from '../screens/WalletScreen';
 
 // Import clean, professional icons from lucide-react-native
 import { 
   Home, 
   Briefcase, 
-  Mic, 
+  Wallet,
+  Users,
   MessageSquare, 
   User 
 } from 'lucide-react-native';
@@ -36,80 +38,137 @@ import {
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-// Premium Tab Icon Component
-const TabIcon = ({ Icon, focused }) => (
-  <View style={[styles.tabIconContainer, focused && styles.tabIconFocused]}>
-    <Icon 
-      size={24} 
-      color={focused ? COLORS.primary : COLORS.textTertiary} 
-      strokeWidth={focused ? 2.5 : 2} 
-    />
-  </View>
-);
+// Tab Configuration Array (6 tabs)
+const TABS = [
+  { name: 'Home', label: 'Home', icon: Home, component: HomeScreen },
+  { name: 'Jobs', label: 'Jobs', icon: Briefcase, component: JobsScreen },
+  { name: 'Wallet', label: 'Wallet', icon: Wallet, component: WalletScreen },
+  { name: 'Network', label: 'Network', icon: Users, component: NetworkScreen },
+  { name: 'Messages', label: 'Messages', icon: MessageSquare, component: MessagesScreen },
+  { name: 'Profile', label: 'Profile', icon: User, component: ProfileScreen },
+];
+
+// 🎯 Animated Icon Component: Pops up and scales when focused
+const AnimatedTabIcon = ({ Icon, focused, color, size }) => {
+  const scaleAnim = useRef(new Animated.Value(focused ? 1.15 : 1)).current;
+  const translateYAnim = useRef(new Animated.Value(focused ? -4 : 0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scaleAnim, {
+        toValue: focused ? 1.15 : 1,
+        friction: 6,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+      Animated.spring(translateYAnim, {
+        toValue: focused ? -4 : 0,
+        friction: 6,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [focused]);
+
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }, { translateY: translateYAnim }] }}>
+      <Icon size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
+    </Animated.View>
+  );
+};
+
+// 🎨 Custom Tab Bar with Slide-Up Entrance Animation
+const CustomTabBar = ({ state, descriptors, navigation }) => {
+  const slideAnim = useRef(new Animated.Value(50)).current;
+
+  useEffect(() => {
+    Animated.spring(slideAnim, {
+      toValue: 0,
+      friction: 8,
+      tension: 40,
+      useNativeDriver: true,
+    }).start();
+  }, [slideAnim]);
+
+  return (
+    <Animated.View style={[styles.tabBarWrapper, { transform: [{ translateY: slideAnim }] }]}>
+      <View style={styles.tabBar}>
+        {state.routes.map((route, index) => {
+          const { options } = descriptors[route.key];
+          const isFocused = state.index === index;
+
+          const onPress = () => {
+            const event = navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
+
+            if (!isFocused && !event.defaultPrevented) {
+              navigation.navigate(route.name);
+            }
+          };
+
+          const onLongPress = () => {
+            navigation.emit({
+              type: 'tabLongPress',
+              target: route.key,
+            });
+          };
+
+          const color = isFocused ? COLORS.primary : COLORS.textTertiary;
+          const tabConfig = TABS.find(t => t.name === route.name);
+          const IconComponent = tabConfig ? tabConfig.icon : Home;
+
+          return (
+            <TouchableOpacity
+              key={route.key}
+              accessibilityRole="button"
+              accessibilityState={isFocused ? { selected: true } : {}}
+              accessibilityLabel={options.tabBarAccessibilityLabel}
+              testID={options.tabBarTestID}
+              onPress={onPress}
+              onLongPress={onLongPress}
+              style={styles.tabItem}
+              activeOpacity={0.7}
+            >
+              <AnimatedTabIcon 
+                Icon={IconComponent} 
+                focused={isFocused} 
+                color={color} 
+                size={22}
+              />
+              <Text style={[styles.tabLabel, { color }]}>
+                {options.tabBarLabel !== undefined ? options.tabBarLabel : route.name}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </Animated.View>
+  );
+};
 
 // Bottom Tabs Navigator
 const MainTabs = () => {
   return (
     <Tab.Navigator
+      tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textTertiary,
-        tabBarStyle: styles.tabBar,
-        tabBarLabelStyle: styles.tabBarLabel,
-        tabBarHideOnKeyboard: true, // Hides tab bar when keyboard is open for better UX
+        tabBarHideOnKeyboard: true,
       }}
     >
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{
-          tabBarLabel: 'Home',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon Icon={Home} focused={focused} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Jobs"
-        component={JobsScreen}
-        options={{
-          tabBarLabel: 'Jobs',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon Icon={Briefcase} focused={focused} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Rooms"
-        component={AudioRoomsScreen}
-        options={{
-          tabBarLabel: 'Rooms',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon Icon={Mic} focused={focused} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Messages"
-        component={MessagesScreen}
-        options={{
-          tabBarLabel: 'Messages',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon Icon={MessageSquare} focused={focused} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          tabBarLabel: 'Profile',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon Icon={User} focused={focused} />
-          ),
-        }}
-      />
+      {TABS.map((tab) => (
+        <Tab.Screen
+          key={tab.name}
+          name={tab.name}
+          component={tab.component}
+          options={{
+            tabBarLabel: tab.label,
+          }}
+        />
+      ))}
     </Tab.Navigator>
   );
 };
@@ -125,6 +184,27 @@ const MainNavigator = () => {
       }}
     >
       <Stack.Screen name="Tabs" component={MainTabs} />
+      
+      <Stack.Screen 
+        name="AudioRooms" 
+        component={AudioRoomsScreen} 
+        options={{ 
+          headerShown: true,
+          title: 'VivaRooms',
+          headerBackTitle: 'Back'
+        }} 
+      />
+      
+      {/* 🎯 FIX: Reusing ProfileScreen for viewing OTHER users' profiles */}
+      <Stack.Screen 
+        name="UserProfile" 
+        component={ProfileScreen} 
+        options={{ 
+          headerShown: true,
+          title: 'Profile' // Your ProfileScreen can dynamically change this title based on route.params
+        }} 
+      />
+      
       <Stack.Screen name="JobDetail" component={JobDetailScreen} />
       <Stack.Screen name="PostJob" component={PostJobScreen} />
       <Stack.Screen name="Chat" component={ChatScreen} />
@@ -133,40 +213,41 @@ const MainNavigator = () => {
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen name="Search" component={SearchScreen} />
       <Stack.Screen name="AudioRoomDetail" component={AudioRoomDetailScreen} />
-      <Stack.Screen name="Wallet" component={WalletScreen} />
     </Stack.Navigator>
   );
 };
 
 const styles = StyleSheet.create({
+  tabBarWrapper: {
+    backgroundColor: 'transparent',
+  },
   tabBar: {
+    flexDirection: 'row',
     backgroundColor: COLORS.white,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.borderLight || '#F1F5F9',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     paddingTop: 12,
-    paddingBottom: 24, // Extra padding for iPhone home indicator
-    height: 88,
+    paddingBottom: 24,
+    paddingHorizontal: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.06,
     shadowRadius: 12,
-    elevation: 10,
+    elevation: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight || '#F8FAFC',
   },
-  tabBarLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 6,
-    letterSpacing: 0.2,
-  },
-  tabIconContainer: {
-    width: 48,
-    height: 32,
-    justifyContent: 'center',
+  tabItem: {
+    flex: 1,
     alignItems: 'center',
-    borderRadius: 16,
+    justifyContent: 'center',
+    paddingVertical: 4,
   },
-  tabIconFocused: {
-    backgroundColor: COLORS.primaryLight || '#EFF6FF',
+  tabLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 4,
+    letterSpacing: 0.1,
   },
 });
 
