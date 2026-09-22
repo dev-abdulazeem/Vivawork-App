@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -32,23 +31,15 @@ import {
   Shield,
   Calendar,
   RotateCcw,
-  ListChecks,
   X,
   PhoneCall,
   FileText,
-  Image as ImageIcon,
-  Eye,
-  ArrowRight,
-  UserCheck,
-  Banknote,
-  Archive,
-  Ban,
 } from 'lucide-react-native';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 // ════════════════════════════════════════════════════════════════
-// COLORS
+// COLORS (Unchanged)
 // ════════════════════════════════════════════════════════════════
 const C = {
   emerald50: '#ecfdf5',
@@ -87,247 +78,11 @@ const formatTime = (dateString) => {
   });
 };
 
-const formatTimeAgo = (dateString) => {
-  if (!dateString) return '';
-  const date = new Date(dateString);
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return 'now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return date.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' });
-};
-
-const getInitials = (firstName, lastName) => {
-  const f = firstName?.trim()?.[0] || '';
-  const l = lastName?.trim()?.[0] || '';
-  return `${f}${l}`.toUpperCase() || '?';
-};
-
 const formatCallDuration = (seconds) => {
   if (!seconds) return '0:00';
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
-
-// ════════════════════════════════════════════════════════════════
-// AVATAR
-// ════════════════════════════════════════════════════════════════
-const Avatar = ({ uri, firstName, lastName, size = 40 }) => {
-  const dim = { width: size, height: size, borderRadius: size / 2 };
-  if (uri)
-    return (
-      <Image
-        source={{ uri }}
-        style={[styles.avatarImg, dim]}
-      />
-    );
-  return (
-    <View style={[styles.avatarFallback, dim, { backgroundColor: C.emerald600 }]}>
-      <Text style={[styles.avatarFallbackText, { fontSize: size * 0.36 }]}>
-        {getInitials(firstName, lastName)}
-      </Text>
-    </View>
-  );
-};
-
-// ════════════════════════════════════════════════════════════════
-// OFFER CARD
-// ════════════════════════════════════════════════════════════════
-const OfferCard = ({ offer, isMe, sender, onAccept, onReject, onCancel }) => {
-  if (!offer) return null;
-
-  const isPending = offer.status === 'pending';
-  const isAccepted = offer.status === 'accepted';
-
-  const statusConfig = {
-    pending: {
-      icon: Clock,
-      text: 'Pending',
-      bgColor: C.emerald500,
-      textColor: C.white,
-    },
-    accepted: {
-      icon: CheckCircle2,
-      text: 'Accepted',
-      bgColor: C.emerald500,
-      textColor: C.white,
-    },
-    rejected: {
-      icon: XCircle,
-      text: 'Rejected',
-      bgColor: C.red50,
-      textColor: C.red500,
-    },
-  };
-
-  const status = statusConfig[offer.status] || statusConfig.pending;
-  const StatusIcon = status.icon;
-
-  return (
-    <View
-      style={[
-        styles.offerCard,
-        {
-          backgroundColor: isMe ? C.emerald500 : C.white,
-          borderWidth: isMe ? 0 : 1,
-          borderColor: isMe ? 'transparent' : C.slate200,
-          alignSelf: isMe ? 'flex-end' : 'flex-start',
-          maxWidth: '90%',
-        },
-      ]}
-    >
-      {/* Header */}
-      <View
-        style={[
-          styles.offerHeader,
-          { backgroundColor: isMe ? 'rgba(255,255,255,0.15)' : C.slate50 },
-        ]}
-      >
-        <View
-          style={[
-            styles.offerIconWrap,
-            { backgroundColor: isMe ? 'rgba(255,255,255,0.2)' : C.emerald100 },
-          ]}
-        >
-          <Briefcase size={16} color={isMe ? C.white : C.emerald600} strokeWidth={2.2} />
-        </View>
-        <View>
-          <Text style={[styles.offerLabel, { color: isMe ? C.emerald100 : C.emerald600 }]}>
-            JOB OFFER
-          </Text>
-          <Text style={[styles.offerType, { color: isMe ? C.emerald200 : C.slate400 }]}>
-            {offer.type?.replace(/_/g, ' ').toUpperCase()}
-          </Text>
-        </View>
-      </View>
-
-      {/* Amount */}
-      <View style={styles.offerAmount}>
-        <Text style={[styles.offerAmountLabel, { color: isMe ? C.emerald200 : C.slate400 }]}>
-          Amount
-        </Text>
-        <Text style={[styles.offerAmountValue, { color: isMe ? C.white : C.slate900 }]}>
-          ₦{offer.amount?.toLocaleString?.() || '0'}
-        </Text>
-      </View>
-
-      {/* Details Grid */}
-      <View style={styles.offerGrid}>
-        {offer.durationDays && (
-          <View
-            style={[
-              styles.offerGridItem,
-              { backgroundColor: isMe ? 'rgba(255,255,255,0.1)' : C.slate50 },
-            ]}
-          >
-            <Calendar size={13} color={isMe ? C.emerald200 : C.slate400} strokeWidth={2} />
-            <View>
-              <Text style={[styles.offerGridLabel, { color: isMe ? C.emerald300 : C.slate400 }]}>
-                Duration
-              </Text>
-              <Text style={[styles.offerGridValue, { color: isMe ? C.white : C.slate700 }]}>
-                {offer.durationDays}d
-              </Text>
-            </View>
-          </View>
-        )}
-        {offer.revisions !== undefined && (
-          <View
-            style={[
-              styles.offerGridItem,
-              { backgroundColor: isMe ? 'rgba(255,255,255,0.1)' : C.slate50 },
-            ]}
-          >
-            <RotateCcw size={13} color={isMe ? C.emerald200 : C.slate400} strokeWidth={2} />
-            <View>
-              <Text style={[styles.offerGridLabel, { color: isMe ? C.emerald300 : C.slate400 }]}>
-                Revisions
-              </Text>
-              <Text style={[styles.offerGridValue, { color: isMe ? C.white : C.slate700 }]}>
-                {offer.revisions}
-              </Text>
-            </View>
-          </View>
-        )}
-      </View>
-
-      {/* Description */}
-      {offer.description && (
-        <View style={styles.offerDescription}>
-          <Text style={[styles.offerDescLabel, { color: isMe ? C.emerald200 : C.slate400 }]}>
-            Description
-          </Text>
-          <Text style={[styles.offerDescText, { color: isMe ? C.emerald50 : C.slate600 }]}>
-            {offer.description}
-          </Text>
-        </View>
-      )}
-
-      {/* Deliverables */}
-      {offer.deliverables && offer.deliverables.length > 0 && offer.deliverables[0] !== '' && (
-        <View style={styles.offerDeliverables}>
-          <Text style={[styles.offerDelLabel, { color: isMe ? C.emerald200 : C.slate400 }]}>
-            Deliverables
-          </Text>
-          {offer.deliverables.map((d, i) => (
-            <View key={i} style={styles.delItem}>
-              <ListChecks size={12} color={isMe ? C.emerald300 : C.emerald500} strokeWidth={2} />
-              <Text style={[styles.delText, { color: isMe ? C.emerald100 : C.slate600 }]}>{d}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Status Badge */}
-      <View style={[styles.statusBadge, { backgroundColor: status.bgColor }]}>
-        <StatusIcon size={12} color={status.textColor} strokeWidth={2.2} />
-        <Text style={[styles.statusText, { color: status.textColor }]}>{status.text}</Text>
-      </View>
-
-      {/* Action Buttons */}
-      {isPending && !isMe && (
-        <View style={styles.offerActions}>
-          <TouchableOpacity style={styles.acceptBtn} onPress={() => onAccept?.(offer.id)}>
-            <CheckCircle2 size={13} color={C.white} strokeWidth={2} />
-            <Text style={styles.acceptBtnText}>Accept</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.rejectBtn} onPress={() => onReject?.(offer.id)}>
-            <XCircle size={13} color={C.slate600} strokeWidth={2} />
-            <Text style={styles.rejectBtnText}>Decline</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {isPending && isMe && (
-        <TouchableOpacity
-          style={[styles.cancelOfferBtn, { backgroundColor: isMe ? 'rgba(255,255,255,0.2)' : C.slate100 }]}
-          onPress={() => onCancel?.(offer.id)}
-        >
-          <Text style={[styles.cancelOfferBtnText, { color: isMe ? C.white : C.slate600 }]}>
-            Cancel Offer
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      {isAccepted && (
-        <View
-          style={[
-            styles.protectedWrap,
-            { backgroundColor: isMe ? 'rgba(255,255,255,0.1)' : C.emerald50 },
-          ]}
-        >
-          <Shield size={13} color={isMe ? C.white : C.emerald500} strokeWidth={2} />
-          <Text style={[styles.protectedText, { color: isMe ? C.white : C.emerald600 }]}>
-            Payment secured
-          </Text>
-        </View>
-      )}
-    </View>
-  );
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -342,24 +97,147 @@ const CallHistoryBubble = ({ msg, onCallBack }) => {
     <View
       style={[
         styles.callHistoryBubble,
-        {
-          backgroundColor: isMissed ? C.red50 : C.slate50,
-          borderColor: isMissed ? C.red100 : C.slate200,
-        },
+        { borderColor: isMissed ? C.red100 : C.slate200, backgroundColor: isMissed ? C.red50 : C.slate50 },
       ]}
     >
-      <PhoneCall size={13} color={isMissed ? C.red500 : C.emerald500} strokeWidth={2} />
+      <View style={[styles.callIconWrap, { backgroundColor: isMissed ? C.red100 : C.emerald100 }]}>
+        <PhoneCall size={16} color={isMissed ? C.red600 : C.emerald600} strokeWidth={2} />
+      </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.callHistoryText, { color: isMissed ? C.red600 : C.slate600 }]}>
-          {isMissed ? 'Missed' : 'Call'} {msg.callType === 'video' ? 'video' : 'voice'} call
+        <Text style={[styles.callHistoryText, { color: isMissed ? C.red600 : C.slate700 }]}>
+          {isMissed ? 'Missed Call' : 'Call Ended'}
+        </Text>
+        <Text style={styles.callHistorySubtext}>
+          {msg.callType === 'video' ? 'Video' : 'Voice'} call {duration > 0 ? `• ${formatCallDuration(duration)}` : ''}
         </Text>
       </View>
-      {duration > 0 && (
-        <Text style={styles.callDurationText}>{formatCallDuration(duration)}</Text>
+      {duration > 0 || !isMissed ? (
+        <TouchableOpacity onPress={() => onCallBack?.(msg.callType)} style={styles.callBackBtn}>
+          <PhoneCall size={16} color={C.emerald600} strokeWidth={2} />
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+};
+
+// ════════════════════════════════════════════════════════════════
+// OFFER CARD
+// ════════════════════════════════════════════════════════════════
+const OfferCard = ({ offer, isMe, onAccept, onReject, onCancel }) => {
+  if (!offer) return null;
+
+  const isPending = offer.status === 'pending';
+  const isAccepted = offer.status === 'accepted';
+
+  const statusConfig = {
+    pending: { icon: Clock, text: 'Pending Review', bgColor: C.slate100, textColor: C.slate600, iconColor: C.slate500 },
+    accepted: { icon: CheckCircle2, text: 'Offer Accepted', bgColor: C.emerald50, textColor: C.emerald700, iconColor: C.emerald600 },
+    rejected: { icon: XCircle, text: 'Offer Declined', bgColor: C.red50, textColor: C.red600, iconColor: C.red500 },
+  };
+
+  const status = statusConfig[offer.status] || statusConfig.pending;
+  const StatusIcon = status.icon;
+
+  const cardBg = isMe ? C.emerald50 : C.white;
+  const cardBorder = isMe ? C.emerald100 : C.slate200;
+  const iconBg = isMe ? C.emerald100 : C.slate100;
+  const iconColor = isMe ? C.emerald600 : C.slate600;
+
+  return (
+    <View style={[styles.offerCard, { backgroundColor: cardBg, borderColor: cardBorder, alignSelf: isMe ? 'flex-end' : 'flex-start' }]}>
+      <View style={styles.offerHeader}>
+        <View style={[styles.offerIconWrap, { backgroundColor: iconBg }]}>
+          <Briefcase size={18} color={iconColor} strokeWidth={2} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.offerLabel, { color: C.slate500 }]}>
+            {offer.type?.replace(/_/g, ' ').toUpperCase() || 'JOB OFFER'}
+          </Text>
+          <Text style={[styles.offerTitle, { color: C.slate900 }]}>
+            {offer.title || 'Custom Offer'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.offerAmountWrap}>
+        <Text style={[styles.offerAmountLabel, { color: C.slate400 }]}>Total Amount</Text>
+        <Text style={[styles.offerAmountValue, { color: C.slate900 }]}>
+          ₦{offer.amount?.toLocaleString?.() || '0'}
+        </Text>
+      </View>
+
+      <View style={styles.offerGrid}>
+        {offer.durationDays && (
+          <View style={[styles.offerGridItem, { backgroundColor: isMe ? C.white : C.slate50 }]}>
+            <Calendar size={14} color={C.slate400} strokeWidth={2} />
+            <View>
+              <Text style={styles.offerGridLabel}>Duration</Text>
+              <Text style={styles.offerGridValue}>{offer.durationDays} Days</Text>
+            </View>
+          </View>
+        )}
+        {offer.revisions !== undefined && (
+          <View style={[styles.offerGridItem, { backgroundColor: isMe ? C.white : C.slate50 }]}>
+            <RotateCcw size={14} color={C.slate400} strokeWidth={2} />
+            <View>
+              <Text style={styles.offerGridLabel}>Revisions</Text>
+              <Text style={styles.offerGridValue}>{offer.revisions} Included</Text>
+            </View>
+          </View>
+        )}
+      </View>
+
+      {offer.description ? (
+        <View style={styles.offerSection}>
+          <Text style={styles.offerSectionTitle}>Description</Text>
+          <Text style={styles.offerSectionText}>{offer.description}</Text>
+        </View>
+      ) : null}
+
+      {offer.deliverables && offer.deliverables.length > 0 && offer.deliverables[0] !== '' ? (
+        <View style={styles.offerSection}>
+          <Text style={styles.offerSectionTitle}>Deliverables</Text>
+          {offer.deliverables.map((d, i) => (
+            <View key={i} style={styles.delItem}>
+              <Check size={14} color={C.emerald500} strokeWidth={2.5} />
+              <Text style={styles.delText}>{d}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      <View style={[styles.statusBadge, { backgroundColor: status.bgColor }]}>
+        <StatusIcon size={14} color={status.iconColor} strokeWidth={2} />
+        <Text style={[styles.statusText, { color: status.textColor }]}>{status.text}</Text>
+      </View>
+
+      {isPending && !isMe && (
+        <View style={styles.offerActions}>
+          <TouchableOpacity style={styles.rejectBtn} onPress={() => onReject?.(offer.id)}>
+            <Text style={styles.rejectBtnText}>Decline</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.acceptBtn} onPress={() => onAccept?.(offer.id)}>
+            <Check size={16} color={C.white} strokeWidth={2.5} />
+            <Text style={styles.acceptBtnText}>Accept Offer</Text>
+          </TouchableOpacity>
+        </View>
       )}
-      <TouchableOpacity onPress={() => onCallBack?.(msg.callType)} style={styles.callBackBtn}>
-        <PhoneCall size={13} color={C.emerald500} strokeWidth={2} />
-      </TouchableOpacity>
+
+      {isPending && isMe && (
+        <TouchableOpacity style={styles.cancelOfferBtn} onPress={() => onCancel?.(offer.id)}>
+          <X size={14} color={C.red500} strokeWidth={2} />
+          <Text style={styles.cancelOfferBtnText}>Cancel Offer</Text>
+        </TouchableOpacity>
+      )}
+
+      {isAccepted && (
+        <View style={[styles.protectedWrap, { backgroundColor: C.emerald50 }]}>
+          <Shield size={14} color={C.emerald600} strokeWidth={2} />
+          <Text style={[styles.protectedText, { color: C.emerald700 }]}>
+            Payment secured in escrow
+          </Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -372,54 +250,42 @@ const MessageBubble = ({ msg, isMe, onDelete }) => {
   const isImage = msg.fileType?.startsWith('image/');
 
   return (
-    <View
-      style={{
-        marginVertical: 4,
-        marginHorizontal: 12,
-        alignItems: isMe ? 'flex-end' : 'flex-start',
-      }}
-    >
+    <View style={[styles.messageContainer, { alignItems: isMe ? 'flex-end' : 'flex-start' }]}>
       <View
         style={[
           styles.messageBubble,
           {
             backgroundColor: isMe ? C.emerald500 : C.white,
-            borderWidth: isMe ? 0 : 1,
             borderColor: isMe ? 'transparent' : C.slate200,
-            borderTopLeftRadius: isMe ? 12 : 3,
-            borderTopRightRadius: isMe ? 3 : 12,
-            maxWidth: '85%',
+            borderTopLeftRadius: isMe ? 16 : 4,
+            borderTopRightRadius: isMe ? 4 : 16,
+            borderBottomLeftRadius: 16,
+            borderBottomRightRadius: 16,
           },
         ]}
       >
         {isFile ? (
           isImage ? (
             <View>
-              <Image
-                source={{ uri: msg.fileUrl }}
-                style={styles.msgImageFile}
-              />
-              <Text style={[styles.msgFileNameText, { color: isMe ? C.emerald100 : C.slate600 }]}>
-                {msg.fileName}
-              </Text>
+              <Image source={{ uri: msg.fileUrl }} style={styles.msgImageFile} />
+              {msg.fileName && (
+                <Text style={[styles.msgFileNameText, { color: isMe ? C.emerald100 : C.slate600 }]}>
+                  {msg.fileName}
+                </Text>
+              )}
             </View>
           ) : (
             <View style={styles.msgFileWrap}>
-              <View
-                style={[
-                  styles.msgFileIconWrap,
-                  { backgroundColor: isMe ? 'rgba(255,255,255,0.2)' : C.slate100 },
-                ]}
-              >
-                <FileText size={16} color={isMe ? C.white : C.slate600} strokeWidth={2} />
+              <View style={[styles.msgFileIconWrap, { backgroundColor: isMe ? 'rgba(255,255,255,0.2)' : C.slate100 }]}>
+                <FileText size={18} color={isMe ? C.white : C.slate600} strokeWidth={2} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.msgFileName, { color: isMe ? C.white : C.slate800 }]}>
+                <Text style={[styles.msgFileName, { color: isMe ? C.white : C.slate800 }]} numberOfLines={1}>
                   {msg.fileName}
                 </Text>
-                <TouchableOpacity onPress={() => msg.fileUrl && alert('Downloading...')}>
-                  <Text style={[styles.downloadLink, { color: isMe ? C.emerald200 : C.emerald600 }]}>
-                    Download
+                <TouchableOpacity onPress={() => msg.fileUrl && Alert.alert('Download', 'Downloading file...')}>
+                  <Text style={[styles.downloadLink, { color: isMe ? C.emerald100 : C.emerald600 }]}>
+                    Download File
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -433,19 +299,19 @@ const MessageBubble = ({ msg, isMe, onDelete }) => {
       </View>
 
       <View style={[styles.msgMeta, { alignItems: isMe ? 'flex-end' : 'flex-start' }]}>
-        <Text style={[styles.msgTime, { color: isMe ? C.emerald600 : C.slate400 }]}>
+        <Text style={[styles.msgTime, { color: isMe ? C.emerald200 : C.slate400 }]}>
           {formatTime(msg.createdAt)}
         </Text>
         {isMe && (
-          <View style={{ marginLeft: 4 }}>
-            <Check size={10} color={msg.isRead ? C.emerald500 : C.emerald300} strokeWidth={3} />
+          <View style={styles.msgReadReceipt}>
+            <Check size={12} color={msg.isRead ? C.white : C.emerald200} strokeWidth={3} />
           </View>
         )}
       </View>
 
       {onDelete && (
         <TouchableOpacity onPress={() => onDelete(msg.id)} style={styles.msgDeleteBtn}>
-          <X size={12} color={C.red500} strokeWidth={2.5} />
+          <X size={14} color={C.slate400} strokeWidth={2} />
         </TouchableOpacity>
       )}
     </View>
@@ -464,21 +330,19 @@ const ChatScreen = ({ route, navigation }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [showOfferModal, setShowOfferModal] = useState(false);
-  const [typingUser, setTypingUser] = useState(null);
-  const typingTimeoutRef = useRef(null);
-
+  const [newDeliverable, setNewDeliverable] = useState('');
+  
   const [offerData, setOfferData] = useState({
     amount: '',
     title: '',
     description: '',
     durationDays: '7',
     revisions: '3',
-    deliverables: [''],
+    deliverables: [],
   });
 
   const flatListRef = useRef(null);
 
-  // Fetch messages
   const fetchMessages = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -502,19 +366,14 @@ const ChatScreen = ({ route, navigation }) => {
     }, 100);
   };
 
-  // Send message
   const sendMessage = async () => {
     if (!messageText.trim()) return;
-
     const content = messageText.trim();
     setMessageText('');
 
     try {
       setIsSending(true);
-      const response = await api.post('/messages', {
-        receiverId: userId,
-        content: content,
-      });
+      const response = await api.post('/messages', { receiverId: userId, content });
       setMessages((prev) => [...prev, response.data.data]);
       scrollToBottom();
     } catch (err) {
@@ -526,16 +385,14 @@ const ChatScreen = ({ route, navigation }) => {
     }
   };
 
-  // Send offer
   const sendOffer = async () => {
     if (!offerData.amount || !offerData.title) {
-      Alert.alert('Error', 'Fill in amount and title');
+      Alert.alert('Error', 'Please fill in the amount and title');
       return;
     }
 
     try {
       setIsSending(true);
-      const deliverables = offerData.deliverables.filter((d) => d.trim() !== '');
       const response = await api.post('/messages/offers', {
         receiverId: userId,
         amount: parseFloat(offerData.amount),
@@ -544,7 +401,7 @@ const ChatScreen = ({ route, navigation }) => {
         type: 'direct_hire',
         durationDays: parseInt(offerData.durationDays) || 7,
         revisions: parseInt(offerData.revisions) || 3,
-        deliverables: deliverables,
+        deliverables: offerData.deliverables,
       });
 
       setMessages((prev) => [
@@ -556,24 +413,12 @@ const ChatScreen = ({ route, navigation }) => {
           createdAt: new Date().toISOString(),
           isRead: false,
           offer: response.data.offer,
-          sender: {
-            id: currentUser.id,
-            firstName: currentUser.firstName,
-            lastName: currentUser.lastName,
-            avatar: currentUser.avatar,
-          },
         },
       ]);
 
       setShowOfferModal(false);
-      setOfferData({
-        amount: '',
-        title: '',
-        description: '',
-        durationDays: '7',
-        revisions: '3',
-        deliverables: [''],
-      });
+      setOfferData({ amount: '', title: '', description: '', durationDays: '7', revisions: '3', deliverables: [] });
+      setNewDeliverable('');
       scrollToBottom();
     } catch (err) {
       console.error('Send offer error:', err);
@@ -583,9 +428,8 @@ const ChatScreen = ({ route, navigation }) => {
     }
   };
 
-  // Delete message
   const deleteMessage = async (messageId) => {
-    Alert.alert('Delete', 'Delete this message?', [
+    Alert.alert('Delete Message', 'Are you sure you want to delete this message?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -602,19 +446,14 @@ const ChatScreen = ({ route, navigation }) => {
     ]);
   };
 
-  // Accept offer
   const acceptOffer = async (offerId) => {
     try {
       setIsSending(true);
       await api.patch(`/messages/offers/${offerId}/accept`);
       setMessages((prev) =>
-        prev.map((msg) =>
-          msg.offer?.id === offerId
-            ? { ...msg, offer: { ...msg.offer, status: 'accepted' } }
-            : msg
-        )
+        prev.map((msg) => (msg.offer?.id === offerId ? { ...msg, offer: { ...msg.offer, status: 'accepted' } } : msg))
       );
-      Alert.alert('Success', 'Offer accepted!');
+      Alert.alert('Success', 'Offer accepted successfully!');
     } catch (err) {
       Alert.alert('Error', err.response?.data?.message || 'Failed to accept offer');
     } finally {
@@ -622,17 +461,12 @@ const ChatScreen = ({ route, navigation }) => {
     }
   };
 
-  // Reject offer
   const rejectOffer = async (offerId) => {
     try {
       setIsSending(true);
       await api.patch(`/messages/offers/${offerId}/reject`);
       setMessages((prev) =>
-        prev.map((msg) =>
-          msg.offer?.id === offerId
-            ? { ...msg, offer: { ...msg.offer, status: 'rejected' } }
-            : msg
-        )
+        prev.map((msg) => (msg.offer?.id === offerId ? { ...msg, offer: { ...msg.offer, status: 'rejected' } } : msg))
       );
     } catch (err) {
       Alert.alert('Error', 'Failed to reject offer');
@@ -662,25 +496,21 @@ const ChatScreen = ({ route, navigation }) => {
           text: 'Block Contact',
           style: 'destructive',
           onPress: async () => {
-            Alert.alert(
-              'Block',
-              `Block ${otherUser.firstName}? They won't be able to message you.`,
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Block',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await api.post(`/messages/block/${userId}`);
-                      navigation.goBack();
-                    } catch (err) {
-                      Alert.alert('Error', 'Failed to block');
-                    }
-                  },
+            Alert.alert('Block Contact', `Block ${otherUser.firstName}? They won't be able to message you.`, [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Block',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await api.post(`/messages/block/${userId}`);
+                    navigation.goBack();
+                  } catch (err) {
+                    Alert.alert('Error', 'Failed to block');
+                  }
                 },
-              ]
-            );
+              },
+            ]);
           },
         },
       ]
@@ -699,7 +529,6 @@ const ChatScreen = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBackBtn}>
           <ChevronLeft size={24} color={C.slate700} strokeWidth={2.5} />
@@ -720,12 +549,11 @@ const ChatScreen = ({ route, navigation }) => {
             <Video size={18} color={C.emerald600} strokeWidth={2.2} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerActionBtn} onPress={handleChatMenu}>
-            <MoreHorizontal size={18} color={C.slate400} strokeWidth={2} />
+            <MoreHorizontal size={18} color={C.slate500} strokeWidth={2} />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Messages */}
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -742,9 +570,9 @@ const ChatScreen = ({ route, navigation }) => {
                 <OfferCard
                   offer={msg.offer}
                   isMe={isMe}
-                  sender={msg.sender}
                   onAccept={acceptOffer}
                   onReject={rejectOffer}
+                  onCancel={deleteMessage}
                 />
               ) : (
                 <MessageBubble msg={msg} isMe={isMe} onDelete={deleteMessage} />
@@ -758,11 +586,10 @@ const ChatScreen = ({ route, navigation }) => {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Input */}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ backgroundColor: C.white }}>
         <View style={styles.inputWrap}>
-          <TouchableOpacity style={styles.attachBtn}>
-            <Paperclip size={18} color={C.emerald600} strokeWidth={2.2} />
+          <TouchableOpacity style={styles.iconBtn}>
+            <Paperclip size={20} color={C.slate500} strokeWidth={2} />
           </TouchableOpacity>
 
           <TextInput
@@ -772,14 +599,11 @@ const ChatScreen = ({ route, navigation }) => {
             value={messageText}
             onChangeText={setMessageText}
             multiline
-            maxHeight={100}
+            maxLength={1000}
           />
 
-          <TouchableOpacity
-            style={styles.offerBtn}
-            onPress={() => setShowOfferModal(true)}
-          >
-            <HandCoins size={18} color={C.emerald600} strokeWidth={2.2} />
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setShowOfferModal(true)}>
+            <HandCoins size={20} color={C.emerald600} strokeWidth={2} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -790,92 +614,149 @@ const ChatScreen = ({ route, navigation }) => {
             {isSending ? (
               <ActivityIndicator size="small" color={C.white} />
             ) : (
-              <Send size={16} color={C.white} strokeWidth={2.5} />
+              <Send size={18} color={C.white} strokeWidth={2.5} />
             )}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
 
-      {/* Offer Modal */}
+      {/* Compact, Keyboard-Aware Offer Modal */}
       <Modal visible={showOfferModal} animationType="slide" transparent>
-        <SafeAreaView style={styles.modalContainer} edges={['top']}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Send Offer</Text>
-            <TouchableOpacity onPress={() => setShowOfferModal(false)}>
-              <X size={24} color={C.slate700} strokeWidth={2} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.modalContent}>
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Amount (₦)</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="50,000"
-                keyboardType="decimal-pad"
-                value={offerData.amount}
-                onChangeText={(v) => setOfferData({ ...offerData, amount: v })}
-              />
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={{ flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)' }}
+        >
+          <SafeAreaView style={styles.modalContainer} edges={['top']}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Create Offer</Text>
+              <TouchableOpacity onPress={() => setShowOfferModal(false)} style={styles.modalCloseBtn}>
+                <X size={22} color={C.slate700} strokeWidth={2.5} />
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Title</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="e.g. Mobile App Development"
-                value={offerData.title}
-                onChangeText={(v) => setOfferData({ ...offerData, title: v })}
-              />
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Description</Text>
-              <TextInput
-                style={[styles.formInput, { minHeight: 80 }]}
-                placeholder="Describe the work..."
-                multiline
-                value={offerData.description}
-                onChangeText={(v) => setOfferData({ ...offerData, description: v })}
-              />
-            </View>
-
-            <View style={styles.formRow}>
-              <View style={[styles.formGroup, { flex: 1 }]}>
-                <Text style={styles.formLabel}>Duration (days)</Text>
-                <TextInput
-                  style={styles.formInput}
-                  keyboardType="number-pad"
-                  value={offerData.durationDays}
-                  onChangeText={(v) => setOfferData({ ...offerData, durationDays: v })}
-                />
-              </View>
-              <View style={[styles.formGroup, { flex: 1, marginLeft: 12 }]}>
-                <Text style={styles.formLabel}>Revisions</Text>
-                <TextInput
-                  style={styles.formInput}
-                  keyboardType="number-pad"
-                  value={offerData.revisions}
-                  onChangeText={(v) => setOfferData({ ...offerData, revisions: v })}
-                />
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={styles.submitBtn}
-              onPress={sendOffer}
-              disabled={isSending}
+            <ScrollView 
+              style={styles.modalContent} 
+              showsVerticalScrollIndicator={false} 
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 32 }}
             >
-              {isSending ? (
-                <ActivityIndicator size="small" color={C.white} />
-              ) : (
-                <>
-                  <HandCoins size={16} color={C.white} strokeWidth={2.2} />
-                  <Text style={styles.submitBtnText}>Send Offer</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </ScrollView>
-        </SafeAreaView>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Offer Amount (₦)</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="e.g. 50000"
+                  keyboardType="decimal-pad"
+                  value={offerData.amount}
+                  onChangeText={(v) => setOfferData({ ...offerData, amount: v })}
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Job Title</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="e.g. Mobile App Development"
+                  value={offerData.title}
+                  onChangeText={(v) => setOfferData({ ...offerData, title: v })}
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Description</Text>
+                <TextInput
+                  style={[styles.formInput, { minHeight: 80, textAlignVertical: 'top' }]}
+                  placeholder="Describe the scope of work..."
+                  multiline
+                  value={offerData.description}
+                  onChangeText={(v) => setOfferData({ ...offerData, description: v })}
+                />
+              </View>
+
+              <View style={styles.formRow}>
+                <View style={[styles.formGroup, { flex: 1 }]}>
+                  <Text style={styles.formLabel}>Duration (Days)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    keyboardType="number-pad"
+                    placeholder="7"
+                    value={offerData.durationDays}
+                    onChangeText={(v) => setOfferData({ ...offerData, durationDays: v })}
+                  />
+                </View>
+                <View style={[styles.formGroup, { flex: 1 }]}>
+                  <Text style={styles.formLabel}>Revisions</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    keyboardType="number-pad"
+                    placeholder="3"
+                    value={offerData.revisions}
+                    onChangeText={(v) => setOfferData({ ...offerData, revisions: v })}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Deliverables</Text>
+                <View style={styles.deliverableInputRow}>
+                  <TextInput
+                    style={styles.deliverableInput}
+                    placeholder="e.g. Source code"
+                    value={newDeliverable}
+                    onChangeText={setNewDeliverable}
+                    onSubmitEditing={() => {
+                      if (newDeliverable.trim()) {
+                        setOfferData({ ...offerData, deliverables: [...offerData.deliverables, newDeliverable.trim()] });
+                        setNewDeliverable('');
+                      }
+                    }}
+                  />
+                  <TouchableOpacity 
+                    style={styles.addDeliverableBtn}
+                    onPress={() => {
+                      if (newDeliverable.trim()) {
+                        setOfferData({ ...offerData, deliverables: [...offerData.deliverables, newDeliverable.trim()] });
+                        setNewDeliverable('');
+                      }
+                    }}
+                  >
+                    <Text style={styles.addDeliverableText}>Add</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.deliverablesList}>
+                  {offerData.deliverables.map((d, i) => (
+                    <View key={i} style={styles.deliverableChip}>
+                      <Text style={styles.deliverableChipText} numberOfLines={1}>{d}</Text>
+                      <TouchableOpacity 
+                        onPress={() => {
+                          const newDels = offerData.deliverables.filter((_, idx) => idx !== i);
+                          setOfferData({ ...offerData, deliverables: newDels });
+                        }}
+                        style={styles.chipRemoveBtn}
+                      >
+                        <X size={14} color={C.red500} strokeWidth={2} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.submitBtn, isSending && styles.submitBtnDisabled]}
+                onPress={sendOffer}
+                disabled={isSending}
+              >
+                {isSending ? (
+                  <ActivityIndicator size="small" color={C.white} />
+                ) : (
+                  <>
+                    <Send size={18} color={C.white} strokeWidth={2.5} />
+                    <Text style={styles.submitBtnText}>Send Offer</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -888,242 +769,334 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.white },
   centerFill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: C.slate100,
+    backgroundColor: C.white,
   },
-  headerBackBtn: { padding: 8, marginLeft: -8 },
+  headerBackBtn: { padding: 8, marginRight: 8 },
   headerContent: { flex: 1 },
-  headerName: { fontSize: 16, fontWeight: '700', color: C.slate900 },
-  headerStatus: { fontSize: 11, color: C.emerald600, marginTop: 2 },
-  headerActions: { flexDirection: 'row', gap: 8 },
+  headerName: { fontSize: 16, fontWeight: '700', color: C.slate900, letterSpacing: 0.2 },
+  headerStatus: { fontSize: 12, color: C.emerald600, marginTop: 2, fontWeight: '500' },
+  headerActions: { flexDirection: 'row', gap: 12 },
   headerActionBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: C.slate50,
   },
 
-  // Messages
-  messagesList: { paddingHorizontal: 4, paddingTop: 8, paddingBottom: 12 },
+  messagesList: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 16 },
+  messageContainer: { marginVertical: 6, maxWidth: '85%' },
+  messageBubble: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  msgText: { fontSize: 15, lineHeight: 22 },
+  msgMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, paddingHorizontal: 4 },
+  msgTime: { fontSize: 11, fontWeight: '500' },
+  msgReadReceipt: { marginLeft: 2 },
+  msgDeleteBtn: { marginTop: 4, padding: 4, alignSelf: 'flex-end' },
 
-  // Input
+  msgImageFile: { width: 200, height: 200, borderRadius: 12, marginBottom: 8 },
+  msgFileNameText: { fontSize: 12, fontWeight: '600' },
+  msgFileWrap: { flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 180 },
+  msgFileIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  msgFileName: { fontSize: 13, fontWeight: '600', flex: 1 },
+  downloadLink: { fontSize: 12, fontWeight: '600', marginTop: 4 },
+
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: C.slate100,
     backgroundColor: C.white,
   },
-  attachBtn: { paddingHorizontal: 8, paddingVertical: 8 },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.slate50,
+    marginBottom: 2,
+  },
   input: {
     flex: 1,
     backgroundColor: C.slate50,
-    borderRadius: 10,
-    paddingHorizontal: 12,
+    borderRadius: 20,
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    fontSize: 14,
+    fontSize: 15,
     color: C.slate900,
-    maxHeight: 100,
+    maxHeight: 120,
+    lineHeight: 20,
   },
-  offerBtn: { paddingHorizontal: 8, paddingVertical: 8 },
   sendBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: C.emerald500,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 2,
   },
   sendBtnDisabled: { backgroundColor: C.slate200 },
 
-  // Offer Card
   offerCard: {
-    borderRadius: 14,
-    padding: 12,
-    marginVertical: 6,
-    marginHorizontal: 12,
+    borderRadius: 16,
+    padding: 16,
+    marginVertical: 8,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
   },
   offerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingBottom: 10,
-    marginBottom: 10,
+    gap: 12,
+    paddingBottom: 12,
+    marginBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.1)',
+    borderBottomColor: C.slate100,
   },
   offerIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  offerLabel: { fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
-  offerType: { fontSize: 8, fontWeight: '600', marginTop: 2 },
-  offerAmount: { marginBottom: 10 },
-  offerAmountLabel: { fontSize: 9, fontWeight: '700', marginBottom: 3 },
-  offerAmountValue: { fontSize: 22, fontWeight: '800' },
+  offerLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
+  offerTitle: { fontSize: 15, fontWeight: '700', marginTop: 2 },
+  offerAmountWrap: { marginBottom: 16 },
+  offerAmountLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
+  offerAmountValue: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
   offerGrid: {
     flexDirection: 'row',
-    gap: 6,
-    marginBottom: 10,
+    gap: 12,
+    marginBottom: 16,
   },
   offerGridItem: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    padding: 8,
-    borderRadius: 8,
+    gap: 10,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  offerGridLabel: { fontSize: 8, fontWeight: '700' },
-  offerGridValue: { fontSize: 11, fontWeight: '700', marginTop: 2 },
-  offerDescription: { marginBottom: 10 },
-  offerDescLabel: { fontSize: 9, fontWeight: '700', marginBottom: 4 },
-  offerDescText: { fontSize: 11, lineHeight: 16 },
-  offerDeliverables: { marginBottom: 10 },
-  offerDelLabel: { fontSize: 9, fontWeight: '700', marginBottom: 6 },
-  delItem: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5 },
-  delText: { fontSize: 10, flex: 1 },
+  offerGridLabel: { fontSize: 11, fontWeight: '600', color: C.slate500 },
+  offerGridValue: { fontSize: 13, fontWeight: '700', color: C.slate800, marginTop: 2 },
+  offerSection: { marginBottom: 12 },
+  offerSectionTitle: { fontSize: 12, fontWeight: '700', color: C.slate500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  offerSectionText: { fontSize: 14, lineHeight: 20, color: C.slate700 },
+  delItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
+  delText: { fontSize: 13, color: C.slate700, flex: 1, lineHeight: 18 },
+
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    marginBottom: 10,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginBottom: 16,
+    alignSelf: 'flex-start',
   },
-  statusText: { fontSize: 10, fontWeight: '700' },
-  offerActions: { flexDirection: 'row', gap: 6 },
+  statusText: { fontSize: 12, fontWeight: '700' },
+
+  offerActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
   acceptBtn: {
-    flex: 1,
+    flex: 1.5,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
-    paddingVertical: 9,
+    gap: 8,
+    paddingVertical: 12,
     backgroundColor: C.emerald500,
-    borderRadius: 8,
+    borderRadius: 12,
   },
-  acceptBtnText: { color: C.white, fontWeight: '700', fontSize: 11 },
+  acceptBtnText: { color: C.white, fontWeight: '700', fontSize: 14 },
   rejectBtn: {
     flex: 1,
-    paddingVertical: 9,
-    backgroundColor: C.slate100,
-    borderRadius: 8,
+    paddingVertical: 12,
+    backgroundColor: C.white,
+    borderRadius: 12,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.slate200,
   },
-  rejectBtnText: { color: C.slate600, fontWeight: '700', fontSize: 11 },
+  rejectBtnText: { color: C.slate600, fontWeight: '700', fontSize: 14 },
   cancelOfferBtn: {
-    paddingVertical: 8,
-    borderRadius: 8,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    backgroundColor: C.red50,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.red100,
   },
-  cancelOfferBtnText: { fontWeight: '700', fontSize: 11 },
+  cancelOfferBtnText: { color: C.red600, fontWeight: '700', fontSize: 13 },
   protectedWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginTop: 4,
   },
-  protectedText: { fontSize: 10, fontWeight: '700' },
+  protectedText: { fontSize: 12, fontWeight: '700' },
 
-  // Call History
   callHistoryBubble: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginHorizontal: 12,
-    marginVertical: 6,
-    borderRadius: 10,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginVertical: 8,
+    borderRadius: 16,
     borderWidth: 1,
   },
-  callHistoryText: { fontSize: 11, fontWeight: '600', flex: 1 },
-  callDurationText: { fontSize: 10, color: C.slate400, marginRight: 4 },
-  callBackBtn: { padding: 4 },
-
-  // Message Bubble
-  messageBubble: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
-  msgText: { fontSize: 13, lineHeight: 18 },
-  msgMeta: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 },
-  msgTime: { fontSize: 10 },
-  msgDeleteBtn: { marginTop: 3, padding: 4 },
-  msgImageFile: { width: '100%', height: 160, borderRadius: 8, marginBottom: 6 },
-  msgFileNameText: { fontSize: 10, fontWeight: '600' },
-  msgFileWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  msgFileIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+  callIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  msgFileName: { fontSize: 11, fontWeight: '600', flex: 1 },
-  downloadLink: { fontSize: 10, fontWeight: '700', marginTop: 2 },
-
-  avatarImg: { backgroundColor: C.slate200 },
-  avatarFallback: {
+  callHistoryText: { fontSize: 13, fontWeight: '700' },
+  callHistorySubtext: { fontSize: 12, color: C.slate500, marginTop: 2 },
+  callBackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.emerald50,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarFallbackText: { color: C.white, fontWeight: '800' },
 
-  // Modal
-  modalContainer: { flex: 1, backgroundColor: C.white },
+  // Modal Styles (Optimized for height and closeability)
+  modalContainer: { 
+    flex: 1, 
+    backgroundColor: C.white,
+  },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: C.slate100,
+    backgroundColor: C.white,
   },
   modalTitle: { fontSize: 18, fontWeight: '800', color: C.slate900 },
-  modalContent: { padding: 16, flex: 1 },
-  formGroup: { marginBottom: 14 },
-  formRow: { flexDirection: 'row', gap: 12, marginBottom: 14 },
-  formLabel: { fontSize: 13, fontWeight: '700', color: C.slate700, marginBottom: 6 },
+  modalCloseBtn: { 
+    padding: 8, 
+    backgroundColor: C.slate100,
+    borderRadius: 20,
+  },
+  modalContent: { 
+    flex: 1, 
+    paddingHorizontal: 20, 
+    paddingTop: 20,
+  },
+  formGroup: { marginBottom: 16 },
+  formRow: { flexDirection: 'row', gap: 16, marginBottom: 0 },
+  formLabel: { fontSize: 13, fontWeight: '700', color: C.slate700, marginBottom: 8, letterSpacing: 0.2 },
   formInput: {
     backgroundColor: C.slate50,
     borderWidth: 1,
     borderColor: C.slate200,
     borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
     fontSize: 14,
     color: C.slate900,
+    height: 44,
   },
+  
+  // Compact Deliverables
+  deliverableInputRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  deliverableInput: {
+    flex: 1,
+    backgroundColor: C.slate50,
+    borderWidth: 1,
+    borderColor: C.slate200,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    fontSize: 14,
+    color: C.slate900,
+    height: 44,
+  },
+  addDeliverableBtn: {
+    backgroundColor: C.emerald50,
+    borderWidth: 1,
+    borderColor: C.emerald200,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: 44,
+  },
+  addDeliverableText: { color: C.emerald700, fontWeight: '700', fontSize: 13 },
+  deliverablesList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  deliverableChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.slate100,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+  },
+  deliverableChipText: { fontSize: 12, fontWeight: '600', color: C.slate700, maxWidth: 200 },
+  chipRemoveBtn: { padding: 2 },
+
   submitBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: C.emerald500,
-    paddingVertical: 12,
+    backgroundColor: C.emerald600,
+    paddingVertical: 16,
     borderRadius: 12,
-    marginTop: 8,
-    marginBottom: 24,
+    marginTop: 12,
+    shadowColor: C.emerald600,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  submitBtnText: { color: C.white, fontWeight: '700', fontSize: 14 },
+  submitBtnDisabled: { backgroundColor: C.slate300, shadowOpacity: 0 },
+  submitBtnText: { color: C.white, fontWeight: '700', fontSize: 16, letterSpacing: 0.2 },
 });
 
 export default ChatScreen;

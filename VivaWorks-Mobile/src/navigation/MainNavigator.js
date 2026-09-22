@@ -12,7 +12,7 @@ import JobsScreen from '../screens/JobsScreen';
 import WalletScreen from '../screens/WalletScreen';
 import NetworkScreen from '../screens/NetworkScreen';
 import MessagesScreen from '../screens/MessagesScreen';
-import ProfileScreen from '../screens/ProfileScreen'; // 🎯 Reusing your existing ProfileScreen
+import ProfileScreen from '../screens/ProfileScreen'; 
 
 // Stack Screens
 import JobDetailScreen from '../screens/JobDetailScreen';
@@ -24,6 +24,10 @@ import EditProfileScreen from '../screens/EditProfileScreen';
 import SearchScreen from '../screens/SearchScreen';
 import AudioRoomsScreen from '../screens/AudioRoomsScreen';
 import AudioRoomDetailScreen from '../screens/AudioRoomDetailScreen';
+
+// 🎯 NEW: Contract Screens
+import ContractsScreen from '../screens/ContractsScreen';
+import ContractDetailScreen from '../screens/ContractDetailScreen';
 
 // Import clean, professional icons from lucide-react-native
 import { 
@@ -185,6 +189,7 @@ const MainNavigator = () => {
     >
       <Stack.Screen name="Tabs" component={MainTabs} />
       
+      {/* Audio & Social */}
       <Stack.Screen 
         name="AudioRooms" 
         component={AudioRoomsScreen} 
@@ -194,25 +199,32 @@ const MainNavigator = () => {
           headerBackTitle: 'Back'
         }} 
       />
+      <Stack.Screen name="AudioRoomDetail" component={AudioRoomDetailScreen} />
       
-      {/* 🎯 FIX: Reusing ProfileScreen for viewing OTHER users' profiles */}
+      {/* User Profiles */}
       <Stack.Screen 
         name="UserProfile" 
         component={ProfileScreen} 
         options={{ 
           headerShown: true,
-          title: 'Profile' // Your ProfileScreen can dynamically change this title based on route.params
+          title: 'Profile'
         }} 
       />
+      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       
+      {/* Jobs & Contracts */}
       <Stack.Screen name="JobDetail" component={JobDetailScreen} />
       <Stack.Screen name="PostJob" component={PostJobScreen} />
+      
+      {/* 🎯 NEW: Added Contract Screens */}
+      <Stack.Screen name="Contracts" component={ContractsScreen} />
+      <Stack.Screen name="ContractDetail" component={ContractDetailScreen} />
+      
+      {/* Communication & Settings */}
       <Stack.Screen name="Chat" component={ChatScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
-      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen name="Search" component={SearchScreen} />
-      <Stack.Screen name="AudioRoomDetail" component={AudioRoomDetailScreen} />
     </Stack.Navigator>
   );
 };

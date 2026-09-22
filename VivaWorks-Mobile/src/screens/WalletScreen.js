@@ -14,6 +14,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -21,9 +22,7 @@ import { COLORS, SIZES, FONTS } from '../constants/theme';
 import api from '../utils/api';
 import Header from '../components/Header';
 
-// Lucide React Native Icons
 import {
-  Loader2,
   AlertCircle,
   RefreshCw,
   X,
@@ -39,12 +38,22 @@ import {
   Plus,
   Trash2,
   Wallet,
+  Search,
+  ChevronDown,
   Shield,
-  ChevronRight,
   Banknote,
   RotateCcw,
   Lock,
 } from 'lucide-react-native';
+
+const LOW_BALANCE_THRESHOLD = 5000;
+
+// Pulls a query param out of a redirect/deep-link URL without relying on the URL polyfill.
+const extractQueryParam = (url, param) => {
+  if (!url) return null;
+  const match = url.match(new RegExp(`[?&]${param}=([^&#]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+};
 
 const WalletScreen = () => {
   const navigation = useNavigation();
@@ -62,6 +71,8 @@ const WalletScreen = () => {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [banks, setBanks] = useState([]);
   const [banksLoading, setBanksLoading] = useState(false);
+  const [showBankList, setShowBankList] = useState(false);
+  const [bankSearchQuery, setBankSearchQuery] = useState('');
   const [withdrawStep, setWithdrawStep] = useState(1);
   const [withdrawData, setWithdrawData] = useState({
     amount: '',
@@ -86,11 +97,7 @@ const WalletScreen = () => {
   const [verifyingPayment, setVerifyingPayment] = useState(false);
 
   const processedRefs = useRef(new Set());
-  const verifyAttempted = useRef(false);
 
-  const LOW_BALANCE_THRESHOLD = 5000;
-
-  // Fetch wallet data
   const fetchWallet = useCallback(async () => {
     try {
       setLoading(true);
@@ -123,7 +130,10 @@ const WalletScreen = () => {
     try {
       setBanksLoading(true);
       const response = await api.get('/wallet/banks');
-      setBanks(response.data.banks || []);
+      const rawBanks = response.data.banks || [];
+      // Some backends return duplicate bank codes — dedupe defensively so list keys stay unique.
+      const uniqueBanks = Array.from(new Map(rawBanks.map((bank) => [bank.code, bank])).values());
+      setBanks(uniqueBanks);
     } catch (err) {
       console.error('Fetch banks error:', err);
       Alert.alert('Error', 'Failed to load banks');
@@ -144,35 +154,28 @@ const WalletScreen = () => {
     }
   }, []);
 
-  const verifyTopUpPayment = useCallback(async (reference) => {
-    if (!reference) return;
-    if (processedRefs.current.has(reference)) return;
-    if (verifyingPayment) return;
+  const verifyTopUpPayment = useCallback(
+    async (reference) => {
+      if (!reference) return;
+      if (processedRefs.current.has(reference)) return;
+      if (verifyingPayment) return;
 
-    processedRefs.current.add(reference);
+      processedRefs.current.add(reference);
 
-    try {
-      setVerifyingPayment(true);
-      Alert.alert('Verifying', 'Verifying your payment...');
-
-      const response = await api.post('/wallet/verify-topup', { reference });
-
-      Alert.alert(
-        'Success',
-        `₦${response.data.amount?.toLocaleString()} added to your wallet!`
-      );
-
-      await fetchWallet();
-    } catch (err) {
-      console.error('Verify top-up error:', err);
-      Alert.alert(
-        'Error',
-        err.response?.data?.message || 'Payment verification failed'
-      );
-    } finally {
-      setVerifyingPayment(false);
-    }
-  }, [fetchWallet, verifyingPayment]);
+      try {
+        setVerifyingPayment(true);
+        const response = await api.post('/wallet/verify-topup', { reference });
+        Alert.alert('Success', `₦${response.data.amount?.toLocaleString()} added to your wallet!`);
+        await fetchWallet();
+      } catch (err) {
+        console.error('Verify top-up error:', err);
+        Alert.alert('Error', err.response?.data?.message || 'Payment verification failed');
+      } finally {
+        setVerifyingPayment(false);
+      }
+    },
+    [fetchWallet, verifyingPayment]
+  );
 
   const manualVerify = async (reference) => {
     if (!reference) {
@@ -188,13 +191,28 @@ const WalletScreen = () => {
     fetchSavedCards();
   }, [fetchWallet, fetchSavedCards]);
 
+  // Catches the app being reopened via the Paystack redirect (deep link) so a top-up
+  // started from this screen gets verified automatically, same as the web query-param flow.
+  useEffect(() => {
+    const handleDeepLink = ({ url }) => {
+      const reference = extractQueryParam(url, 'reference') || extractQueryParam(url, 'trxref');
+      if (reference) verifyTopUpPayment(reference);
+    };
+
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+    Linking.getInitialURL().then((url) => {
+      if (url) handleDeepLink({ url });
+    });
+
+    return () => subscription.remove();
+  }, [verifyTopUpPayment]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchWallet();
     setRefreshing(false);
   }, [fetchWallet]);
 
-  // Handle top-up
   const handleTopUp = async () => {
     const amount = parseFloat(topUpAmount);
 
@@ -208,32 +226,15 @@ const WalletScreen = () => {
       const response = await api.post('/wallet/topup', { amount });
 
       if (response.data.authorizationUrl) {
-        verifyAttempted.current = false;
         processedRefs.current.clear();
-        // In React Native, you'd use Linking or WebView for payment
-        // For now, we'll show an alert
-        Alert.alert(
-          'Redirect',
-          'You will be redirected to complete payment',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                // Handle payment redirect here
-                // You might want to use react-native-inappbrowser or similar
-              },
-            },
-          ]
-        );
+        setShowTopUpModal(false);
+        await Linking.openURL(response.data.authorizationUrl);
       } else {
         Alert.alert('Error', 'Payment initialization failed');
       }
     } catch (err) {
       console.error('Top-up error:', err);
-      Alert.alert(
-        'Error',
-        err.response?.data?.message || 'Failed to initialize payment'
-      );
+      Alert.alert('Error', err.response?.data?.message || 'Failed to initialize payment');
     } finally {
       setTopUpLoading(false);
     }
@@ -273,10 +274,7 @@ const WalletScreen = () => {
       Alert.alert('Success', 'Account verified');
     } catch (err) {
       console.error('Verify error:', err);
-      Alert.alert(
-        'Error',
-        err.response?.data?.message || 'Failed to verify account'
-      );
+      Alert.alert('Error', err.response?.data?.message || 'Failed to verify account');
     } finally {
       setVerifyingAccount(false);
     }
@@ -320,10 +318,7 @@ const WalletScreen = () => {
         setShowWithdrawModal(false);
         fetchWallet();
       } else {
-        Alert.alert(
-          'Error',
-          err.response?.data?.message || 'Failed to send OTP'
-        );
+        Alert.alert('Error', err.response?.data?.message || 'Failed to send OTP');
       }
     } finally {
       setWithdrawLoading(false);
@@ -350,10 +345,7 @@ const WalletScreen = () => {
         Alert.alert('Error', data.message);
       } else if (typeof data?.attemptsLeft === 'number') {
         setOtpAttemptsLeft(data.attemptsLeft);
-        Alert.alert(
-          'Error',
-          `${data.message} (${data.attemptsLeft} attempt${data.attemptsLeft === 1 ? '' : 's'} left)`
-        );
+        Alert.alert('Error', `${data.message} (${data.attemptsLeft} attempt${data.attemptsLeft === 1 ? '' : 's'} left)`);
       } else {
         Alert.alert('Error', data?.message || 'Withdrawal failed');
       }
@@ -376,6 +368,8 @@ const WalletScreen = () => {
     setWithdrawResult(null);
     setOtpAttemptsLeft(null);
     setOtpLocked(false);
+    setShowBankList(false);
+    setBankSearchQuery('');
     fetchBanks();
   };
 
@@ -391,6 +385,12 @@ const WalletScreen = () => {
   }, [wallet?.withdrawalLockedUntil]);
 
   const withdrawalOnCooldown = cooldownHoursLeft > 0;
+
+  const filteredBanks = useMemo(() => {
+    const query = bankSearchQuery.trim().toLowerCase();
+    if (!query) return banks;
+    return banks.filter((bank) => bank.name.toLowerCase().includes(query));
+  }, [banks, bankSearchQuery]);
 
   // Transaction helpers
   const getTransactionIcon = (type) => {
@@ -474,7 +474,6 @@ const WalletScreen = () => {
 
   const isLowBalance = wallet && parseFloat(wallet.balance) < LOW_BALANCE_THRESHOLD;
 
-  // Loading state
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -484,7 +483,6 @@ const WalletScreen = () => {
     );
   }
 
-  // Error state
   if (error) {
     return (
       <SafeAreaView style={styles.errorContainer}>
@@ -510,7 +508,6 @@ const WalletScreen = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#059669']} />
         }
       >
-        {/* Low balance warning */}
         {isLowBalance && (
           <View style={styles.warningBanner}>
             <View style={styles.warningContent}>
@@ -529,7 +526,6 @@ const WalletScreen = () => {
           </View>
         )}
 
-        {/* Withdrawal cooldown notice */}
         {withdrawalOnCooldown && (
           <View style={styles.cooldownBanner}>
             <Lock size={20} color="#6b7280" />
@@ -542,29 +538,19 @@ const WalletScreen = () => {
           </View>
         )}
 
-        {/* Main balance card */}
         <View style={styles.balanceCard}>
           <View style={styles.balanceHeader}>
             <View style={styles.balanceHeaderLeft}>
               <Wallet size={20} color="#a7f3d0" />
               <Text style={styles.balanceLabel}>Available Balance</Text>
             </View>
-            <TouchableOpacity
-              onPress={() => setShowBalance(!showBalance)}
-              style={styles.eyeButton}
-            >
-              {showBalance ? (
-                <Eye size={20} color="#a7f3d0" />
-              ) : (
-                <EyeOff size={20} color="#a7f3d0" />
-              )}
+            <TouchableOpacity onPress={() => setShowBalance(!showBalance)} style={styles.eyeButton}>
+              {showBalance ? <Eye size={20} color="#a7f3d0" /> : <EyeOff size={20} color="#a7f3d0" />}
             </TouchableOpacity>
           </View>
 
           <Text style={styles.balanceAmount}>
-            {showBalance
-              ? `₦${(parseFloat(wallet?.balance) || 0).toLocaleString()}`
-              : '₦••••••'}
+            {showBalance ? `₦${(parseFloat(wallet?.balance) || 0).toLocaleString()}` : '₦••••••'}
           </Text>
 
           <View style={styles.walletTypeContainer}>
@@ -573,10 +559,7 @@ const WalletScreen = () => {
           </View>
 
           <View style={styles.actionButtonsContainer}>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.primaryButton]}
-              onPress={openTopUpModal}
-            >
+            <TouchableOpacity style={[styles.actionButton, styles.primaryButton]} onPress={openTopUpModal}>
               <Plus size={16} color="#059669" />
               <Text style={styles.primaryButtonText}>Add Money</Text>
             </TouchableOpacity>
@@ -585,41 +568,30 @@ const WalletScreen = () => {
               style={[
                 styles.actionButton,
                 styles.secondaryButton,
-                (!wallet?.balance || parseFloat(wallet.balance) < 1000 || withdrawalOnCooldown) &&
-                  styles.disabledButton,
+                (!wallet?.balance || parseFloat(wallet.balance) < 1000 || withdrawalOnCooldown) && styles.disabledButton,
               ]}
               onPress={openWithdrawModal}
               disabled={!wallet?.balance || parseFloat(wallet.balance) < 1000 || withdrawalOnCooldown}
             >
-              {withdrawalOnCooldown ? (
-                <Lock size={16} color="#ffffff" />
-              ) : (
-                <ArrowUpRight size={16} color="#ffffff" />
-              )}
+              {withdrawalOnCooldown ? <Lock size={16} color="#ffffff" /> : <ArrowUpRight size={16} color="#ffffff" />}
               <Text style={styles.secondaryButtonText}>
                 {withdrawalOnCooldown ? `Locked (${cooldownHoursLeft}h)` : 'Withdraw'}
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.actionButton, styles.refreshButton]}
-              onPress={fetchWallet}
-            >
+            <TouchableOpacity style={[styles.actionButton, styles.refreshButton]} onPress={fetchWallet}>
               <RefreshCw size={16} color="#ffffff" />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Stats grid */}
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
             <View style={[styles.statIcon, { backgroundColor: '#ecfdf5' }]}>
               <ArrowDownLeft size={16} color="#059669" />
             </View>
             <Text style={styles.statLabel}>Total In</Text>
-            <Text style={styles.statValue}>
-              ₦{(parseFloat(wallet?.totalIn) || 0).toLocaleString()}
-            </Text>
+            <Text style={styles.statValue}>₦{(parseFloat(wallet?.totalIn) || 0).toLocaleString()}</Text>
           </View>
 
           <View style={styles.statCard}>
@@ -627,9 +599,7 @@ const WalletScreen = () => {
               <ArrowUpRight size={16} color="#ef4444" />
             </View>
             <Text style={styles.statLabel}>Total Out</Text>
-            <Text style={styles.statValue}>
-              ₦{(parseFloat(wallet?.totalOut) || 0).toLocaleString()}
-            </Text>
+            <Text style={styles.statValue}>₦{(parseFloat(wallet?.totalOut) || 0).toLocaleString()}</Text>
           </View>
 
           <View style={styles.statCard}>
@@ -637,9 +607,7 @@ const WalletScreen = () => {
               <Clock size={16} color="#f59e0b" />
             </View>
             <Text style={styles.statLabel}>In Escrow</Text>
-            <Text style={styles.statValue}>
-              ₦{(parseFloat(wallet?.escrowBalance) || 0).toLocaleString()}
-            </Text>
+            <Text style={styles.statValue}>₦{(parseFloat(wallet?.escrowBalance) || 0).toLocaleString()}</Text>
           </View>
 
           <View style={styles.statCard}>
@@ -653,7 +621,6 @@ const WalletScreen = () => {
           </View>
         </View>
 
-        {/* Saved Cards */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View>
@@ -691,10 +658,7 @@ const WalletScreen = () => {
                       {card.isDefault && <Text style={styles.defaultBadge}> Default</Text>}
                     </Text>
                   </View>
-                  <TouchableOpacity
-                    onPress={() => deleteCard(card.id)}
-                    style={styles.deleteButton}
-                  >
+                  <TouchableOpacity onPress={() => deleteCard(card.id)} style={styles.deleteButton}>
                     <Trash2 size={16} color="#9ca3af" />
                   </TouchableOpacity>
                 </View>
@@ -703,23 +667,14 @@ const WalletScreen = () => {
           )}
         </View>
 
-        {/* Transaction History */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View>
               <Text style={styles.sectionTitle}>Transaction History</Text>
               <Text style={styles.sectionSubtitle}>Recent activity on your wallet</Text>
             </View>
-            <TouchableOpacity
-              onPress={fetchTransactions}
-              disabled={txLoading}
-              style={styles.refreshIconButton}
-            >
-              <RefreshCw
-                size={16}
-                color="#9ca3af"
-                style={txLoading ? styles.spinning : null}
-              />
+            <TouchableOpacity onPress={fetchTransactions} disabled={txLoading} style={styles.refreshIconButton}>
+              <RefreshCw size={16} color="#9ca3af" style={txLoading ? styles.spinning : null} />
             </TouchableOpacity>
           </View>
 
@@ -735,12 +690,7 @@ const WalletScreen = () => {
             <View style={styles.transactionsList}>
               {transactions.map((tx) => (
                 <View key={tx.id} style={styles.transactionItem}>
-                  <View
-                    style={[
-                      styles.transactionIcon,
-                      { backgroundColor: getTransactionBgColor(tx.type) },
-                    ]}
-                  >
+                  <View style={[styles.transactionIcon, { backgroundColor: getTransactionBgColor(tx.type) }]}>
                     {getTransactionIcon(tx.type)}
                   </View>
                   <View style={styles.transactionDetails}>
@@ -750,12 +700,7 @@ const WalletScreen = () => {
                     <Text style={styles.transactionDate}>{formatDate(tx.createdAt)}</Text>
                   </View>
                   <View style={styles.transactionRight}>
-                    <Text
-                      style={[
-                        styles.transactionAmount,
-                        { color: getTransactionColor(tx.type) },
-                      ]}
-                    >
+                    <Text style={[styles.transactionAmount, { color: getTransactionColor(tx.type) }]}>
                       {formatAmount(tx.amount, tx.type)}
                     </Text>
                     <View style={styles.transactionStatusContainer}>
@@ -763,8 +708,7 @@ const WalletScreen = () => {
                         style={[
                           styles.statusBadge,
                           tx.status === 'completed' && styles.statusCompleted,
-                          (tx.status === 'pending' || tx.status === 'processing') &&
-                            styles.statusPending,
+                          (tx.status === 'pending' || tx.status === 'processing') && styles.statusPending,
                           tx.status === 'failed' && styles.statusFailed,
                         ]}
                       >
@@ -772,8 +716,7 @@ const WalletScreen = () => {
                           style={[
                             styles.statusText,
                             tx.status === 'completed' && styles.statusCompletedText,
-                            (tx.status === 'pending' || tx.status === 'processing') &&
-                              styles.statusPendingText,
+                            (tx.status === 'pending' || tx.status === 'processing') && styles.statusPendingText,
                             tx.status === 'failed' && styles.statusFailedText,
                           ]}
                         >
@@ -786,8 +729,14 @@ const WalletScreen = () => {
                           disabled={verifyingPayment}
                           style={styles.verifyButton}
                         >
-                          <RotateCcw size={12} color="#059669" />
-                          <Text style={styles.verifyText}>Verify</Text>
+                          {verifyingPayment ? (
+                            <ActivityIndicator size="small" color="#059669" />
+                          ) : (
+                            <>
+                              <RotateCcw size={12} color="#059669" />
+                              <Text style={styles.verifyText}>Verify</Text>
+                            </>
+                          )}
                         </TouchableOpacity>
                       )}
                     </View>
@@ -799,29 +748,21 @@ const WalletScreen = () => {
         </View>
       </ScrollView>
 
-      {/* Withdrawal Modal */}
       <Modal
         visible={showWithdrawModal}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setShowWithdrawModal(false)}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {/* Header */}
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 {withdrawStep === 1 && 'Withdraw Funds'}
                 {withdrawStep === 2 && 'Enter OTP'}
                 {withdrawStep === 3 && 'Withdrawal Successful'}
               </Text>
-              <TouchableOpacity
-                onPress={() => setShowWithdrawModal(false)}
-                style={styles.closeButton}
-              >
+              <TouchableOpacity onPress={() => setShowWithdrawModal(false)} style={styles.closeButton}>
                 <X size={20} color="#9ca3af" />
               </TouchableOpacity>
             </View>
@@ -841,9 +782,7 @@ const WalletScreen = () => {
                     <TextInput
                       style={styles.input}
                       value={withdrawData.amount}
-                      onChangeText={(text) =>
-                        setWithdrawData((prev) => ({ ...prev, amount: text }))
-                      }
+                      onChangeText={(text) => setWithdrawData((prev) => ({ ...prev, amount: text }))}
                       placeholder="Min ₦1,000"
                       keyboardType="numeric"
                     />
@@ -854,41 +793,114 @@ const WalletScreen = () => {
 
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>Bank</Text>
-                    <View style={styles.pickerContainer}>
-                      {banksLoading ? (
-                        <Text style={styles.pickerPlaceholder}>Loading banks...</Text>
-                      ) : (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                          {banks.map((bank) => (
-                            <TouchableOpacity
-                              key={bank.code}
-                              style={[
-                                styles.bankOption,
-                                withdrawData.bankCode === bank.code && styles.bankOptionSelected,
-                              ]}
-                              onPress={() =>
-                                setWithdrawData((prev) => ({
-                                  ...prev,
-                                  bankCode: bank.code,
-                                  bankName: bank.name,
-                                  accountName: '',
-                                }))
-                              }
-                            >
-                              <Text
-                                style={[
-                                  styles.bankOptionText,
-                                  withdrawData.bankCode === bank.code &&
-                                    styles.bankOptionTextSelected,
-                                ]}
-                              >
-                                {bank.name}
-                              </Text>
+                    <TouchableOpacity
+                      style={[styles.bankSelector, showBankList && styles.bankSelectorActive]}
+                      onPress={() => setShowBankList((prev) => !prev)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.bankSelectorLeft}>
+                        {withdrawData.bankName ? (
+                          <View style={styles.bankAvatarSmall}>
+                            <Text style={styles.bankAvatarSmallText}>
+                              {withdrawData.bankName.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                        ) : null}
+                        <Text
+                          style={[
+                            styles.bankSelectorText,
+                            !withdrawData.bankName && styles.bankSelectorPlaceholder,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {withdrawData.bankName || 'Select bank'}
+                        </Text>
+                      </View>
+                      <ChevronDown
+                        size={18}
+                        color="#9ca3af"
+                        style={showBankList ? styles.chevronOpen : null}
+                      />
+                    </TouchableOpacity>
+
+                    {showBankList && (
+                      <View style={styles.bankListContainer}>
+                        <View style={styles.bankSearchRow}>
+                          <Search size={16} color="#9ca3af" />
+                          <TextInput
+                            style={styles.bankSearchInput}
+                            value={bankSearchQuery}
+                            onChangeText={setBankSearchQuery}
+                            placeholder="Search banks..."
+                            placeholderTextColor="#9ca3af"
+                            autoFocus
+                          />
+                          {bankSearchQuery.length > 0 && (
+                            <TouchableOpacity onPress={() => setBankSearchQuery('')} hitSlop={8}>
+                              <X size={16} color="#9ca3af" />
                             </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      )}
-                    </View>
+                          )}
+                        </View>
+
+                        {banksLoading ? (
+                          <View style={styles.bankListLoading}>
+                            <ActivityIndicator size="small" color="#059669" />
+                            <Text style={styles.pickerPlaceholder}>Loading banks...</Text>
+                          </View>
+                        ) : (
+                          <ScrollView
+                            style={styles.bankListScroll}
+                            keyboardShouldPersistTaps="handled"
+                            nestedScrollEnabled
+                            showsVerticalScrollIndicator={false}
+                          >
+                            {filteredBanks.length === 0 ? (
+                              <View style={styles.bankListEmptyContainer}>
+                                <AlertCircle size={18} color="#9ca3af" />
+                                <Text style={styles.bankListEmpty}>No banks found</Text>
+                              </View>
+                            ) : (
+                              filteredBanks.map((bank) => {
+                                const isSelected = withdrawData.bankCode === bank.code;
+                                return (
+                                  <TouchableOpacity
+                                    key={bank.code}
+                                    style={[styles.bankListItem, isSelected && styles.bankListItemSelected]}
+                                    onPress={() => {
+                                      setWithdrawData((prev) => ({
+                                        ...prev,
+                                        bankCode: bank.code,
+                                        bankName: bank.name,
+                                        accountName: '',
+                                      }));
+                                      setShowBankList(false);
+                                      setBankSearchQuery('');
+                                    }}
+                                    activeOpacity={0.7}
+                                  >
+                                    <View style={styles.bankAvatar}>
+                                      <Text style={styles.bankAvatarText}>
+                                        {bank.name.charAt(0).toUpperCase()}
+                                      </Text>
+                                    </View>
+                                    <Text
+                                      style={[
+                                        styles.bankListItemText,
+                                        isSelected && styles.bankListItemTextSelected,
+                                      ]}
+                                      numberOfLines={1}
+                                    >
+                                      {bank.name}
+                                    </Text>
+                                    {isSelected && <CheckCircle2 size={18} color="#059669" />}
+                                  </TouchableOpacity>
+                                );
+                              })
+                            )}
+                          </ScrollView>
+                        )}
+                      </View>
+                    )}
                   </View>
 
                   <View style={styles.inputGroup}>
@@ -911,17 +923,11 @@ const WalletScreen = () => {
                       <TouchableOpacity
                         style={[
                           styles.verifyAccountButton,
-                          (verifyingAccount ||
-                            withdrawData.accountNumber.length !== 10 ||
-                            !withdrawData.bankCode) &&
+                          (verifyingAccount || withdrawData.accountNumber.length !== 10 || !withdrawData.bankCode) &&
                             styles.disabledButton,
                         ]}
                         onPress={verifyAccount}
-                        disabled={
-                          verifyingAccount ||
-                          withdrawData.accountNumber.length !== 10 ||
-                          !withdrawData.bankCode
-                        }
+                        disabled={verifyingAccount || withdrawData.accountNumber.length !== 10 || !withdrawData.bankCode}
                       >
                         {verifyingAccount ? (
                           <ActivityIndicator size="small" color="#374151" />
@@ -945,8 +951,7 @@ const WalletScreen = () => {
                   <TouchableOpacity
                     style={[
                       styles.submitButton,
-                      (withdrawLoading || !withdrawData.accountName || !withdrawData.amount) &&
-                        styles.disabledButton,
+                      (withdrawLoading || !withdrawData.accountName || !withdrawData.amount) && styles.disabledButton,
                     ]}
                     onPress={requestOtp}
                     disabled={withdrawLoading || !withdrawData.accountName || !withdrawData.amount}
@@ -969,9 +974,7 @@ const WalletScreen = () => {
                     <View style={styles.otpIconContainer}>
                       <Clock size={28} color="#059669" />
                     </View>
-                    <Text style={styles.otpInstructions}>
-                      Enter the 6-digit OTP sent to your email
-                    </Text>
+                    <Text style={styles.otpInstructions}>Enter the 6-digit OTP sent to your email</Text>
                   </View>
 
                   {otpLocked ? (
@@ -990,9 +993,7 @@ const WalletScreen = () => {
                         <TextInput
                           style={[styles.input, styles.otpInput]}
                           value={otpCode}
-                          onChangeText={(text) =>
-                            setOtpCode(text.replace(/\D/g, '').slice(0, 6))
-                          }
+                          onChangeText={(text) => setOtpCode(text.replace(/\D/g, '').slice(0, 6))}
                           placeholder="000000"
                           keyboardType="numeric"
                           maxLength={6}
@@ -1006,10 +1007,7 @@ const WalletScreen = () => {
                       </View>
 
                       <TouchableOpacity
-                        style={[
-                          styles.submitButton,
-                          (withdrawLoading || otpCode.length !== 6) && styles.disabledButton,
-                        ]}
+                        style={[styles.submitButton, (withdrawLoading || otpCode.length !== 6) && styles.disabledButton]}
                         onPress={confirmWithdrawal}
                         disabled={withdrawLoading || otpCode.length !== 6}
                       >
@@ -1023,10 +1021,7 @@ const WalletScreen = () => {
                         )}
                       </TouchableOpacity>
 
-                      <TouchableOpacity
-                        onPress={() => setWithdrawStep(1)}
-                        style={styles.backButton}
-                      >
+                      <TouchableOpacity onPress={() => setWithdrawStep(1)} style={styles.backButton}>
                         <Text style={styles.backButtonText}>Back to details</Text>
                       </TouchableOpacity>
                     </>
@@ -1051,32 +1046,24 @@ const WalletScreen = () => {
                     </View>
                     <View style={styles.successRow}>
                       <Text style={styles.successLabel}>Status</Text>
-                      <Text style={[styles.successValue, { color: '#059669' }]}>
-                        {withdrawResult.status}
-                      </Text>
+                      <Text style={[styles.successValue, { color: '#059669' }]}>{withdrawResult.status}</Text>
                     </View>
                     {withdrawResult.nextWithdrawalAvailableAt && (
                       <View style={styles.successRow}>
                         <Text style={styles.successLabel}>Next withdrawal available</Text>
                         <Text style={styles.successValue}>
-                          {new Date(withdrawResult.nextWithdrawalAvailableAt).toLocaleString(
-                            'en-NG',
-                            {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            }
-                          )}
+                          {new Date(withdrawResult.nextWithdrawalAvailableAt).toLocaleString('en-NG', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </Text>
                       </View>
                     )}
                   </View>
 
-                  <TouchableOpacity
-                    style={styles.submitButton}
-                    onPress={() => setShowWithdrawModal(false)}
-                  >
+                  <TouchableOpacity style={styles.submitButton} onPress={() => setShowWithdrawModal(false)}>
                     <Text style={styles.submitButtonText}>Done</Text>
                   </TouchableOpacity>
                 </View>
@@ -1086,27 +1073,20 @@ const WalletScreen = () => {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Top-up Modal */}
       <Modal
         visible={showTopUpModal}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setShowTopUpModal(false)}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>Add Money</Text>
                 <Text style={styles.modalSubtitle}>Fund your wallet securely</Text>
               </View>
-              <TouchableOpacity
-                onPress={() => setShowTopUpModal(false)}
-                style={styles.closeButton}
-              >
+              <TouchableOpacity onPress={() => setShowTopUpModal(false)} style={styles.closeButton}>
                 <X size={20} color="#9ca3af" />
               </TouchableOpacity>
             </View>
@@ -1143,18 +1123,10 @@ const WalletScreen = () => {
                 {[1000, 5000, 10000, 50000].map((amt) => (
                   <TouchableOpacity
                     key={amt}
-                    style={[
-                      styles.quickAmountButton,
-                      topUpAmount === amt.toString() && styles.quickAmountSelected,
-                    ]}
+                    style={[styles.quickAmountButton, topUpAmount === amt.toString() && styles.quickAmountSelected]}
                     onPress={() => setTopUpAmount(amt.toString())}
                   >
-                    <Text
-                      style={[
-                        styles.quickAmountText,
-                        topUpAmount === amt.toString() && styles.quickAmountTextSelected,
-                      ]}
-                    >
+                    <Text style={[styles.quickAmountText, topUpAmount === amt.toString() && styles.quickAmountTextSelected]}>
                       ₦{amt.toLocaleString()}
                     </Text>
                   </TouchableOpacity>
@@ -1270,7 +1242,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  // Warning banner
   warningBanner: {
     backgroundColor: '#fffbeb',
     borderWidth: 1,
@@ -1315,7 +1286,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  // Cooldown banner
   cooldownBanner: {
     backgroundColor: '#f9fafb',
     borderWidth: 1,
@@ -1341,7 +1311,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4b5563',
   },
-  // Balance card
   balanceCard: {
     backgroundColor: '#059669',
     borderRadius: 16,
@@ -1422,7 +1391,6 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.5,
   },
-  // Stats grid
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1458,7 +1426,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111827',
   },
-  // Sections
   section: {
     backgroundColor: '#ffffff',
     borderWidth: 1,
@@ -1506,7 +1473,6 @@ const styles = StyleSheet.create({
   spinning: {
     opacity: 0.5,
   },
-  // Empty states
   emptyCards: {
     padding: 32,
     alignItems: 'center',
@@ -1535,7 +1501,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     textAlign: 'center',
   },
-  // Cards list
   cardsList: {
     padding: 16,
     paddingTop: 8,
@@ -1576,7 +1541,6 @@ const styles = StyleSheet.create({
   deleteButton: {
     padding: 8,
   },
-  // Transactions
   transactionsList: {
     padding: 16,
     paddingTop: 8,
@@ -1658,7 +1622,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#059669',
   },
-  // Modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
@@ -1737,34 +1700,135 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#9ca3af',
   },
-  pickerContainer: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    padding: 8,
-  },
   pickerPlaceholder: {
-    padding: 12,
     color: '#9ca3af',
     fontSize: 14,
   },
-  bankOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
+  bankSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: '#ffffff',
+  },
+  bankSelectorActive: {
+    borderColor: '#059669',
+  },
+  bankSelectorLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
     marginRight: 8,
+    gap: 10,
+  },
+  bankSelectorText: {
+    fontSize: 14,
+    color: '#111827',
+    flex: 1,
+  },
+  bankSelectorPlaceholder: {
+    color: '#9ca3af',
+  },
+  chevronOpen: {
+    transform: [{ rotate: '180deg' }],
+  },
+  bankAvatarSmall: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ecfdf5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bankAvatarSmallText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  bankListContainer: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 10,
+    marginTop: 8,
+    overflow: 'hidden',
+    backgroundColor: '#ffffff',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  bankSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+    backgroundColor: '#f9fafb',
+  },
+  bankSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#111827',
+    paddingVertical: 2,
+  },
+  bankListScroll: {
+    maxHeight: 240,
+  },
+  bankListLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 16,
+  },
+  bankListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f9fafb',
+  },
+  bankListItemSelected: {
+    backgroundColor: '#ecfdf5',
+  },
+  bankAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  bankOptionSelected: {
-    backgroundColor: '#059669',
-  },
-  bankOptionText: {
+  bankAvatarText: {
     fontSize: 13,
-    color: '#374151',
+    fontWeight: '700',
+    color: '#6b7280',
   },
-  bankOptionTextSelected: {
-    color: '#ffffff',
-    fontWeight: '500',
+  bankListItemText: {
+    fontSize: 14,
+    color: '#374151',
+    flex: 1,
+  },
+  bankListItemTextSelected: {
+    color: '#059669',
+    fontWeight: '600',
+  },
+  bankListEmptyContainer: {
+    alignItems: 'center',
+    gap: 8,
+    padding: 24,
+  },
+  bankListEmpty: {
+    color: '#9ca3af',
+    fontSize: 13,
   },
   accountInputRow: {
     flexDirection: 'row',
@@ -1828,7 +1892,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6b7280',
   },
-  // OTP styles
   otpHeader: {
     alignItems: 'center',
     marginBottom: 8,
@@ -1878,7 +1941,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textDecorationLine: 'underline',
   },
-  // Success styles
   successContainer: {
     alignItems: 'center',
     gap: 16,
@@ -1922,7 +1984,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#111827',
   },
-  // Top-up modal styles
   currentBalanceCard: {
     flexDirection: 'row',
     alignItems: 'center',
