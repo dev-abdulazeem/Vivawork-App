@@ -458,7 +458,16 @@ const ProfileScreen = ({ navigation, route }) => {
   const handleLogout = () => {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: () => { logout(); navigation.reset({ index: 0, routes: [{ name: 'Auth' }] }); } }
+      { 
+        text: 'Log Out', 
+        style: 'destructive', 
+        onPress: () => { 
+          // ✅ FIX: Removed navigation.reset(). 
+          // The AuthContext automatically updates `isAuthenticated` to false, 
+          // which triggers your root AppNavigator to switch to the Auth screens.
+          logout(); 
+        } 
+      }
     ]);
   };
 
@@ -533,7 +542,6 @@ const ProfileScreen = ({ navigation, route }) => {
               <View style={styles.modalLoading}><ActivityIndicator color="#059669" /></View>
             ) : data.length > 0 ? (
               data.map(u => (
-                // 🎯 FIX: Changed </View> to </TouchableOpacity> here
                 <TouchableOpacity key={u.id} style={styles.listItem} onPress={() => { onClose(); navigation.push('UserProfile', { userId: u.id }); }}>
                   {u.avatar ? <Image source={{ uri: u.avatar }} style={styles.listAvatar} /> : (
                     <View style={styles.listAvatarPlaceholder}><Text style={styles.listAvatarText}>{getInitials(u.firstName, u.lastName)}</Text></View>

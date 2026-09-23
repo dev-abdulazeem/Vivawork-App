@@ -30,6 +30,7 @@ import {
   SlidersHorizontal,
   RefreshCw,
   Plus,
+  ChevronRight, // Added for the Contracts button
 } from 'lucide-react-native';
 
 // ────────────────────────────────────────────────────────────────
@@ -550,12 +551,24 @@ const JobsScreen = ({ navigation }) => {
           <View>
             {/* Hero / heading */}
             <View style={styles.heroSection}>
-              <View style={styles.heroBadgeRow}>
-                <View style={styles.heroBadgeIcon}>
-                  <Briefcase size={14} color={C.emerald600} />
+              {/* NEW: Top row with Contracts button */}
+              <View style={styles.heroTopRow}>
+                <View style={styles.heroBadgeRow}>
+                  <View style={styles.heroBadgeIcon}>
+                    <Briefcase size={14} color={C.emerald600} />
+                  </View>
+                  <Text style={styles.heroEyebrow}>JOB BOARD</Text>
                 </View>
-                <Text style={styles.heroEyebrow}>JOB BOARD</Text>
+                <TouchableOpacity 
+                  style={styles.contractsBtn}
+                  onPress={() => navigation.navigate('Contracts')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.contractsBtnText}>My Contracts</Text>
+                  <ChevronRight size={16} color={C.emerald700} />
+                </TouchableOpacity>
               </View>
+
               <Text style={styles.heroTitle}>Find Your Next Project</Text>
               <View style={styles.heroRow}>
                 <Text style={styles.heroSubtitle}>
@@ -681,7 +694,14 @@ const styles = StyleSheet.create({
 
   // Hero
   heroSection: { paddingTop: 16, paddingBottom: 12 },
-  heroBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }, // NEW
+  contractsBtn: { // NEW
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.white, borderWidth: 1, borderColor: C.emerald200,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+  },
+  contractsBtnText: { fontSize: 13, fontWeight: '700', color: C.emerald700 }, // NEW
+  heroBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   heroBadgeIcon: {
     width: 28, height: 28, borderRadius: 8, backgroundColor: C.emerald50,
     alignItems: 'center', justifyContent: 'center',

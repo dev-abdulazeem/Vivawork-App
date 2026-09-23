@@ -52,6 +52,19 @@ export const AuthProvider = ({ children }) => {
       if (storedToken && storedUser) {
         setToken(storedToken);
         setIsAuthenticated(true);
+        
+        // 🚨 CRITICAL FIX: Parse and set the user IMMEDIATELY from storage.
+        // This prevents the "undefined" UI flash or permanent undefined state on reload.
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          setUser(parsedUser);
+        } catch (parseError) {
+          console.error('Error parsing stored user data:', parseError);
+          // If the stored data is corrupted, clear it to prevent future issues
+          await AsyncStorage.removeItem(CONFIG.STORAGE_KEYS.USER_DATA);
+        }
+
+        // Then, fetch fresh data in the background to update the cache
         await fetchUserProfile();
       }
     } catch (error) {
@@ -64,15 +77,33 @@ export const AuthProvider = ({ children }) => {
   const fetchUserProfile = async () => {
     try {
       const response = await api.get('/auth/me');
+      
+      // Handle backend returning { user: { ... } }
       if (response.data?.user) {
         setUser(response.data.user);
         await AsyncStorage.setItem(
           CONFIG.STORAGE_KEYS.USER_DATA,
           JSON.stringify(response.data.user)
         );
+      } 
+      // Fallback: Handle backend returning { id: 1, firstName: "John", ... } directly
+      else if (response.data?.id || response.data?.email) {
+        setUser(response.data);
+        await AsyncStorage.setItem(
+          CONFIG.STORAGE_KEYS.USER_DATA,
+          JSON.stringify(response.data)
+        );
       }
     } catch (error) {
-      if (error.response?.status === 401) await logout();
+      console.error('Error fetching user profile:', error);
+      
+      // 🚨 CRITICAL FIX: ONLY logout if it's a definitive 401 Unauthorized (token is actually invalid).
+      // If it's a network error (e.g., user is offline), we keep the cached user 
+      // so the app doesn't break and show "undefined".
+      if (error.response?.status === 401) {
+        console.log('Token invalid or expired. Logging out...');
+        await logout();
+      }
     }
   };
 

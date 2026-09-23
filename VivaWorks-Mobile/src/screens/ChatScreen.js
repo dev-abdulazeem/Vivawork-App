@@ -1,4 +1,19 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+
+// Requires (install if not already present):
+//   npm install socket.io-client @react-native-async-storage/async-storage
+//   npm install react-native-webrtc
+//   npx expo install expo-image-picker expo-document-picker
+//     (swap expo-image-picker for react-native-image-picker if this
+//      project is on the bare workflow rather than Expo)
+//
+// Native setup needed once:
+//   - Camera + microphone permissions (Info.plist / AndroidManifest,
+//     or app.json "plugins" if using Expo config plugins)
+//   - react-native-webrtc's own install steps (pod install on iOS)
+//   - Incoming calls ring via device vibration (no audio asset
+//     required) — swap in expo-av if you want an actual ringtone sound
+// ════════════════════════════════════════════════════════════════
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,351 +21,144 @@ import {
   FlatList,
   TouchableOpacity,
   TextInput,
-  Image,
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   Modal,
+  Linking,
+  Vibration,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { io } from 'socket.io-client';
 import {
   ChevronLeft,
   MoreHorizontal,
   Send,
   Paperclip,
   Video,
-  Phone,
+  PhoneCall,
   HandCoins,
   Briefcase,
-  Check,
-  Clock,
+  Star,
   CheckCircle2,
-  XCircle,
-  Shield,
-  Calendar,
-  RotateCcw,
   X,
-  PhoneCall,
+  ListChecks,
   FileText,
+  BadgeCheck,
 } from 'lucide-react-native';
+
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import {
+  C,
+  Avatar,
+  OfferCard,
+  CallHistoryBubble,
+  MessageBubble,
+  IncomingCallOverlay,
+  OutgoingCallOverlay,
+  ActiveCallOverlay,
+  formatDate,
+} from '../components/ChatShared';
 
-// ════════════════════════════════════════════════════════════════
-// COLORS (Unchanged)
-// ════════════════════════════════════════════════════════════════
-const C = {
-  emerald50: '#ecfdf5',
-  emerald100: '#d1fae5',
-  emerald200: '#a7f3d0',
-  emerald500: '#10b981',
-  emerald600: '#059669',
-  emerald700: '#047857',
-  red50: '#fef2f2',
-  red100: '#fee2e2',
-  red500: '#ef4444',
-  red600: '#dc2626',
-  slate50: '#f8fafc',
-  slate100: '#f1f5f9',
-  slate200: '#e2e8f0',
-  slate300: '#cbd5e1',
-  slate400: '#94a3b8',
-  slate500: '#64748b',
-  slate600: '#475569',
-  slate700: '#334155',
-  slate900: '#0f172a',
-  blue500: '#3b82f6',
-  white: '#ffffff',
-  gray100: '#f3f4f6',
-};
+// Optional deps — imported defensively so the screen still renders
+// (minus calling / attachments) if a package isn't installed yet.
+let RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, mediaDevices, RTCView;
+try {
+  const webrtc = require('react-native-webrtc');
+  RTCPeerConnection = webrtc.RTCPeerConnection;
+  RTCSessionDescription = webrtc.RTCSessionDescription;
+  RTCIceCandidate = webrtc.RTCIceCandidate;
+  mediaDevices = webrtc.mediaDevices;
+  RTCView = webrtc.RTCView;
+} catch (e) {
+  // react-native-webrtc not installed — calling buttons will show a notice.
+}
 
-// ════════════════════════════════════════════════════════════════
-// HELPERS
-// ════════════════════════════════════════════════════════════════
+let ImagePicker;
+try {
+  ImagePicker = require('expo-image-picker');
+} catch (e) {}
 
-const formatTime = (dateString) => {
-  if (!dateString) return '';
-  return new Date(dateString).toLocaleTimeString('en-NG', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
+let DocumentPicker;
+try {
+  DocumentPicker = require('expo-document-picker');
+} catch (e) {}
 
-const formatCallDuration = (seconds) => {
-  if (!seconds) return '0:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
+const SOCKET_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+];
 
-// ════════════════════════════════════════════════════════════════
-// CALL HISTORY BUBBLE
-// ════════════════════════════════════════════════════════════════
-const CallHistoryBubble = ({ msg, onCallBack }) => {
-  const direction = msg.callDirection || 'outgoing';
-  const isMissed = direction === 'missed';
-  const duration = msg.callDuration || 0;
-
-  return (
-    <View
-      style={[
-        styles.callHistoryBubble,
-        { borderColor: isMissed ? C.red100 : C.slate200, backgroundColor: isMissed ? C.red50 : C.slate50 },
-      ]}
-    >
-      <View style={[styles.callIconWrap, { backgroundColor: isMissed ? C.red100 : C.emerald100 }]}>
-        <PhoneCall size={16} color={isMissed ? C.red600 : C.emerald600} strokeWidth={2} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.callHistoryText, { color: isMissed ? C.red600 : C.slate700 }]}>
-          {isMissed ? 'Missed Call' : 'Call Ended'}
-        </Text>
-        <Text style={styles.callHistorySubtext}>
-          {msg.callType === 'video' ? 'Video' : 'Voice'} call {duration > 0 ? `• ${formatCallDuration(duration)}` : ''}
-        </Text>
-      </View>
-      {duration > 0 || !isMissed ? (
-        <TouchableOpacity onPress={() => onCallBack?.(msg.callType)} style={styles.callBackBtn}>
-          <PhoneCall size={16} color={C.emerald600} strokeWidth={2} />
-        </TouchableOpacity>
-      ) : null}
-    </View>
-  );
-};
-
-// ════════════════════════════════════════════════════════════════
-// OFFER CARD
-// ════════════════════════════════════════════════════════════════
-const OfferCard = ({ offer, isMe, onAccept, onReject, onCancel }) => {
-  if (!offer) return null;
-
-  const isPending = offer.status === 'pending';
-  const isAccepted = offer.status === 'accepted';
-
-  const statusConfig = {
-    pending: { icon: Clock, text: 'Pending Review', bgColor: C.slate100, textColor: C.slate600, iconColor: C.slate500 },
-    accepted: { icon: CheckCircle2, text: 'Offer Accepted', bgColor: C.emerald50, textColor: C.emerald700, iconColor: C.emerald600 },
-    rejected: { icon: XCircle, text: 'Offer Declined', bgColor: C.red50, textColor: C.red600, iconColor: C.red500 },
-  };
-
-  const status = statusConfig[offer.status] || statusConfig.pending;
-  const StatusIcon = status.icon;
-
-  const cardBg = isMe ? C.emerald50 : C.white;
-  const cardBorder = isMe ? C.emerald100 : C.slate200;
-  const iconBg = isMe ? C.emerald100 : C.slate100;
-  const iconColor = isMe ? C.emerald600 : C.slate600;
-
-  return (
-    <View style={[styles.offerCard, { backgroundColor: cardBg, borderColor: cardBorder, alignSelf: isMe ? 'flex-end' : 'flex-start' }]}>
-      <View style={styles.offerHeader}>
-        <View style={[styles.offerIconWrap, { backgroundColor: iconBg }]}>
-          <Briefcase size={18} color={iconColor} strokeWidth={2} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.offerLabel, { color: C.slate500 }]}>
-            {offer.type?.replace(/_/g, ' ').toUpperCase() || 'JOB OFFER'}
-          </Text>
-          <Text style={[styles.offerTitle, { color: C.slate900 }]}>
-            {offer.title || 'Custom Offer'}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.offerAmountWrap}>
-        <Text style={[styles.offerAmountLabel, { color: C.slate400 }]}>Total Amount</Text>
-        <Text style={[styles.offerAmountValue, { color: C.slate900 }]}>
-          ₦{offer.amount?.toLocaleString?.() || '0'}
-        </Text>
-      </View>
-
-      <View style={styles.offerGrid}>
-        {offer.durationDays && (
-          <View style={[styles.offerGridItem, { backgroundColor: isMe ? C.white : C.slate50 }]}>
-            <Calendar size={14} color={C.slate400} strokeWidth={2} />
-            <View>
-              <Text style={styles.offerGridLabel}>Duration</Text>
-              <Text style={styles.offerGridValue}>{offer.durationDays} Days</Text>
-            </View>
-          </View>
-        )}
-        {offer.revisions !== undefined && (
-          <View style={[styles.offerGridItem, { backgroundColor: isMe ? C.white : C.slate50 }]}>
-            <RotateCcw size={14} color={C.slate400} strokeWidth={2} />
-            <View>
-              <Text style={styles.offerGridLabel}>Revisions</Text>
-              <Text style={styles.offerGridValue}>{offer.revisions} Included</Text>
-            </View>
-          </View>
-        )}
-      </View>
-
-      {offer.description ? (
-        <View style={styles.offerSection}>
-          <Text style={styles.offerSectionTitle}>Description</Text>
-          <Text style={styles.offerSectionText}>{offer.description}</Text>
-        </View>
-      ) : null}
-
-      {offer.deliverables && offer.deliverables.length > 0 && offer.deliverables[0] !== '' ? (
-        <View style={styles.offerSection}>
-          <Text style={styles.offerSectionTitle}>Deliverables</Text>
-          {offer.deliverables.map((d, i) => (
-            <View key={i} style={styles.delItem}>
-              <Check size={14} color={C.emerald500} strokeWidth={2.5} />
-              <Text style={styles.delText}>{d}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      <View style={[styles.statusBadge, { backgroundColor: status.bgColor }]}>
-        <StatusIcon size={14} color={status.iconColor} strokeWidth={2} />
-        <Text style={[styles.statusText, { color: status.textColor }]}>{status.text}</Text>
-      </View>
-
-      {isPending && !isMe && (
-        <View style={styles.offerActions}>
-          <TouchableOpacity style={styles.rejectBtn} onPress={() => onReject?.(offer.id)}>
-            <Text style={styles.rejectBtnText}>Decline</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.acceptBtn} onPress={() => onAccept?.(offer.id)}>
-            <Check size={16} color={C.white} strokeWidth={2.5} />
-            <Text style={styles.acceptBtnText}>Accept Offer</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {isPending && isMe && (
-        <TouchableOpacity style={styles.cancelOfferBtn} onPress={() => onCancel?.(offer.id)}>
-          <X size={14} color={C.red500} strokeWidth={2} />
-          <Text style={styles.cancelOfferBtnText}>Cancel Offer</Text>
-        </TouchableOpacity>
-      )}
-
-      {isAccepted && (
-        <View style={[styles.protectedWrap, { backgroundColor: C.emerald50 }]}>
-          <Shield size={14} color={C.emerald600} strokeWidth={2} />
-          <Text style={[styles.protectedText, { color: C.emerald700 }]}>
-            Payment secured in escrow
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-};
-
-// ════════════════════════════════════════════════════════════════
-// TEXT MESSAGE BUBBLE
-// ════════════════════════════════════════════════════════════════
-const MessageBubble = ({ msg, isMe, onDelete }) => {
-  const isFile = msg.fileUrl || msg.fileType;
-  const isImage = msg.fileType?.startsWith('image/');
-
-  return (
-    <View style={[styles.messageContainer, { alignItems: isMe ? 'flex-end' : 'flex-start' }]}>
-      <View
-        style={[
-          styles.messageBubble,
-          {
-            backgroundColor: isMe ? C.emerald500 : C.white,
-            borderColor: isMe ? 'transparent' : C.slate200,
-            borderTopLeftRadius: isMe ? 16 : 4,
-            borderTopRightRadius: isMe ? 4 : 16,
-            borderBottomLeftRadius: 16,
-            borderBottomRightRadius: 16,
-          },
-        ]}
-      >
-        {isFile ? (
-          isImage ? (
-            <View>
-              <Image source={{ uri: msg.fileUrl }} style={styles.msgImageFile} />
-              {msg.fileName && (
-                <Text style={[styles.msgFileNameText, { color: isMe ? C.emerald100 : C.slate600 }]}>
-                  {msg.fileName}
-                </Text>
-              )}
-            </View>
-          ) : (
-            <View style={styles.msgFileWrap}>
-              <View style={[styles.msgFileIconWrap, { backgroundColor: isMe ? 'rgba(255,255,255,0.2)' : C.slate100 }]}>
-                <FileText size={18} color={isMe ? C.white : C.slate600} strokeWidth={2} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.msgFileName, { color: isMe ? C.white : C.slate800 }]} numberOfLines={1}>
-                  {msg.fileName}
-                </Text>
-                <TouchableOpacity onPress={() => msg.fileUrl && Alert.alert('Download', 'Downloading file...')}>
-                  <Text style={[styles.downloadLink, { color: isMe ? C.emerald100 : C.emerald600 }]}>
-                    Download File
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )
-        ) : (
-          <Text style={[styles.msgText, { color: isMe ? C.white : C.slate800 }]}>
-            {msg.content}
-          </Text>
-        )}
-      </View>
-
-      <View style={[styles.msgMeta, { alignItems: isMe ? 'flex-end' : 'flex-start' }]}>
-        <Text style={[styles.msgTime, { color: isMe ? C.emerald200 : C.slate400 }]}>
-          {formatTime(msg.createdAt)}
-        </Text>
-        {isMe && (
-          <View style={styles.msgReadReceipt}>
-            <Check size={12} color={msg.isRead ? C.white : C.emerald200} strokeWidth={3} />
-          </View>
-        )}
-      </View>
-
-      {onDelete && (
-        <TouchableOpacity onPress={() => onDelete(msg.id)} style={styles.msgDeleteBtn}>
-          <X size={14} color={C.slate400} strokeWidth={2} />
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-};
-
-// ════════════════════════════════════════════════════════════════
-// CHAT SCREEN
-// ════════════════════════════════════════════════════════════════
 const ChatScreen = ({ route, navigation }) => {
   const { user: currentUser } = useAuth();
-  const { userId, user: otherUser } = route.params;
+  const { userId, user: otherUserParam } = route.params;
 
+  const [otherUser, setOtherUser] = useState(otherUserParam || null);
   const [messages, setMessages] = useState([]);
   const [messageText, setMessageText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [typingUser, setTypingUser] = useState(null);
+  const [showChatMenu, setShowChatMenu] = useState(false);
+
+  // Offer modal
   const [showOfferModal, setShowOfferModal] = useState(false);
-  const [newDeliverable, setNewDeliverable] = useState('');
-  
   const [offerData, setOfferData] = useState({
     amount: '',
     title: '',
     description: '',
+    type: 'direct_hire',
     durationDays: '7',
     revisions: '3',
-    deliverables: [],
+    deliverables: [''],
   });
+  const [milestones, setMilestones] = useState([]);
+  const [sendingOffer, setSendingOffer] = useState(false);
+
+  // Call state
+  const [socket, setSocket] = useState(null);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [callStatus, setCallStatus] = useState('idle'); // idle | ringing | ongoing
+  const [isInCall, setIsInCall] = useState(false);
+  const [callType, setCallType] = useState('video');
+  const [callDuration, setCallDuration] = useState(0);
+  const [localStreamURL, setLocalStreamURL] = useState(null);
+  const [remoteStreamURL, setRemoteStreamURL] = useState(null);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  const [currentCallRoom, setCurrentCallRoom] = useState(null);
+  const [currentCallId, setCurrentCallId] = useState(null);
 
   const flatListRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const callStartTimeRef = useRef(null);
+  const callTimerRef = useRef(null);
+  const ringtoneRef = useRef(null);
+  const pendingOffersRef = useRef([]);
 
+  // ─── FETCH MESSAGES ────────────────────────────────────────────
   const fetchMessages = useCallback(async () => {
     try {
       setIsLoading(true);
       const response = await api.get(`/messages/conversation/${userId}`);
       setMessages(response.data.messages || []);
+      api.patch(`/messages/read/${userId}`).catch(() => {});
     } catch (err) {
       console.error('Fetch messages error:', err);
-      Alert.alert('Error', 'Failed to load messages');
+      if (err.response?.data?.code === 'BLOCKED') {
+        Alert.alert('Unavailable', 'This conversation is unavailable');
+        navigation.goBack();
+      } else {
+        Alert.alert('Error', 'Failed to load messages');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -361,75 +169,418 @@ const ChatScreen = ({ route, navigation }) => {
   }, [fetchMessages]);
 
   const scrollToBottom = () => {
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages.length]);
+
+  // ─── SOCKET.IO ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    let newSocket;
+
+    (async () => {
+      const token = (await AsyncStorage.getItem('accessToken')) || '';
+      newSocket = io(SOCKET_URL, {
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        auth: { token },
+      });
+
+      newSocket.on('connect', () => {
+        newSocket.emit('join-user-room', currentUser.id);
+      });
+
+      newSocket.on('new_message', (message) => {
+        if (message.senderId === userId) {
+          setMessages((prev) => [...prev, message]);
+          api.patch(`/messages/read/${userId}`).catch(() => {});
+          scrollToBottom();
+        }
+      });
+
+      newSocket.on('messages_read', ({ by }) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.senderId === currentUser.id && m.receiverId === by ? { ...m, isRead: true } : m
+          )
+        );
+      });
+
+      newSocket.on('user_typing', (data) => {
+        if (data.userId === userId) {
+          setTypingUser(data.firstName);
+          clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = setTimeout(() => setTypingUser(null), 3000);
+        }
+      });
+
+      // ── Calling ──
+      newSocket.on('incoming-call', async (data) => {
+        let callerName = data.callerName;
+        let callerAvatar = data.callerAvatar;
+        if (!callerName && data.callerId) {
+          try {
+            const res = await api.get(`/users/profile/${data.callerId}`);
+            callerName = `${res.data.user.firstName} ${res.data.user.lastName}`;
+            callerAvatar = res.data.user.avatar;
+          } catch {
+            callerName = 'Someone';
+          }
+        }
+        setIncomingCall({ ...data, callerName: callerName || 'Someone', callerAvatar: callerAvatar || null });
+        setCallStatus('ringing');
+        playRingtone();
+      });
+
+      newSocket.on('call-accepted', () => {
+        setCallStatus('ongoing');
+        setIsInCall(true);
+        callStartTimeRef.current = Date.now();
+        startCallTimer();
+        stopRingtone();
+      });
+
+      newSocket.on('call-declined', () => {
+        stopRingtone();
+        Alert.alert('Call declined');
+        resetCallState();
+      });
+
+      newSocket.on('call-ended', (data) => {
+        stopRingtone();
+        handleCallEnd(data?.duration);
+      });
+
+      newSocket.on('webrtc-offer', async (data) => {
+        if (!peerConnectionRef.current) {
+          pendingOffersRef.current.push(data);
+          return;
+        }
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await peerConnectionRef.current.createAnswer();
+          await peerConnectionRef.current.setLocalDescription(answer);
+          newSocket.emit('webrtc-answer', { roomId: data.roomId, answer });
+        } catch (err) {
+          console.error('Offer handling error:', err);
+        }
+      });
+
+      newSocket.on('webrtc-answer', async (data) => {
+        if (!peerConnectionRef.current) return;
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+        } catch (err) {
+          console.error('Answer handling error:', err);
+        }
+      });
+
+      newSocket.on('webrtc-ice-candidate', async (data) => {
+        if (!peerConnectionRef.current) return;
+        try {
+          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (err) {
+          console.error('ICE candidate error:', err);
+        }
+      });
+
+      setSocket(newSocket);
+    })();
+
+    return () => {
+      clearTimeout(typingTimeoutRef.current);
+      newSocket?.disconnect();
+      endLocalCall();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, userId]);
+
+  // ─── RINGTONE ──────────────────────────────────────────────────
+  // Uses device vibration for the incoming-call alert so this screen
+  // works with zero extra assets. If you'd rather play an actual
+  // ringtone sound, install expo-av, add your own audio file under
+  // assets/, and swap this for an Audio.Sound.createAsync() call.
+  const RING_PATTERN = [0, 700, 400];
+  const playRingtone = () => {
+    ringtoneRef.current = true;
+    Vibration.vibrate(RING_PATTERN, true);
+  };
+
+  const stopRingtone = () => {
+    if (ringtoneRef.current) {
+      Vibration.cancel();
+      ringtoneRef.current = null;
+    }
+  };
+
+  // ─── CALL TIMER ────────────────────────────────────────────────
+  const startCallTimer = () => {
+    callTimerRef.current = setInterval(() => setCallDuration((p) => p + 1), 1000);
+  };
+  const stopCallTimer = () => {
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+  };
+
+  // ─── WEBRTC ────────────────────────────────────────────────────
+  const startWebRTC = async (roomId, isCaller) => {
+    if (!RTCPeerConnection || !mediaDevices) {
+      Alert.alert('Calling unavailable', 'react-native-webrtc is not installed in this project yet.');
+      resetCallState();
+      return;
+    }
+    try {
+      const stream = await mediaDevices.getUserMedia({
+        audio: true,
+        video: callType === 'video' ? { facingMode: 'user' } : false,
+      });
+      localStreamRef.current = stream;
+      setLocalStreamURL(stream.toURL());
+
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && socket) {
+          socket.emit('webrtc-ice-candidate', { roomId, candidate: event.candidate });
+        }
+      };
+      pc.ontrack = (event) => {
+        if (event.streams?.[0]) setRemoteStreamURL(event.streams[0].toURL());
+      };
+      pc.onconnectionstatechange = () => {
+        if (['disconnected', 'failed'].includes(pc.connectionState)) handleCallEnd();
+      };
+
+      peerConnectionRef.current = pc;
+
+      if (!isCaller && pendingOffersRef.current.length > 0) {
+        for (const pending of pendingOffersRef.current) {
+          if (pending.roomId === roomId) {
+            await pc.setRemoteDescription(new RTCSessionDescription(pending.offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit('webrtc-answer', { roomId, answer });
+          }
+        }
+        pendingOffersRef.current = [];
+      }
+
+      if (isCaller) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit('webrtc-offer', { roomId, offer });
+      }
+
+      socket.emit('join-call-room', roomId);
+    } catch (err) {
+      console.error('WebRTC error:', err);
+      Alert.alert('Could not start call', 'Check camera/microphone permissions and try again.');
+      resetCallState();
+    }
+  };
+
+  const resetCallState = () => {
+    stopCallTimer();
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
+    setLocalStreamURL(null);
+    setRemoteStreamURL(null);
+    setIsInCall(false);
+    setCallStatus('idle');
+    setIncomingCall(null);
+    setCurrentCallRoom(null);
+    setCurrentCallId(null);
+    setCallDuration(0);
+    callStartTimeRef.current = null;
+    pendingOffersRef.current = [];
+  };
+
+  const endLocalCall = useCallback(async () => {
+    const duration = callStartTimeRef.current ? Math.floor((Date.now() - callStartTimeRef.current) / 1000) : 0;
+    const callId = currentCallId;
+    resetCallState();
+    stopRingtone();
+    if (callId) {
+      try {
+        await api.patch(`/messages/call/${callId}/end`, { duration });
+      } catch {}
+    }
+    socket?.emit('call-end', { roomId: currentCallRoom, callId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCallId, currentCallRoom, socket]);
+
+  const handleCallEnd = async (serverDuration) => {
+    const duration = serverDuration ?? (callStartTimeRef.current ? Math.floor((Date.now() - callStartTimeRef.current) / 1000) : 0);
+    const wasOutgoing = incomingCall === null;
+    resetCallState();
+    stopRingtone();
+
+    const historyMsg = {
+      id: `call-${Date.now()}`,
+      senderId: wasOutgoing ? currentUser.id : userId,
+      createdAt: new Date().toISOString(),
+      isRead: true,
+      isCallHistory: true,
+      callDuration: duration,
+      callType,
+      callDirection: wasOutgoing ? 'outgoing' : 'incoming',
+    };
+    setMessages((prev) => [...prev, historyMsg]);
+    scrollToBottom();
+
+    try {
+      await api.post('/messages/call-history', {
+        receiverId: userId,
+        duration,
+        callType,
+        direction: wasOutgoing ? 'outgoing' : 'incoming',
+      });
+    } catch (err) {
+      console.error('Save call history error:', err);
+    }
+  };
+
+  const initiateCall = async (type = 'video') => {
+    if (!socket) return;
+    if (!RTCPeerConnection) {
+      Alert.alert('Calling unavailable', 'react-native-webrtc is not installed in this project yet.');
+      return;
+    }
+    setCallType(type);
+    try {
+      const response = await api.post('/messages/call/initiate', { receiverId: userId, callType: type });
+      const { call } = response.data;
+      setCurrentCallRoom(call.roomId);
+      setCurrentCallId(call.id);
+      setCallStatus('ringing');
+      setIsInCall(true);
+      await startWebRTC(call.roomId, true);
+      socket.emit('call-initiate', {
+        callId: call.id,
+        roomId: call.roomId,
+        callerId: currentUser.id,
+        receiverId: userId,
+        callType: type,
+        callerName: `${currentUser.firstName} ${currentUser.lastName}`,
+        callerAvatar: currentUser.avatar,
+      });
+    } catch (err) {
+      console.error('Initiate call error:', err);
+      Alert.alert('Error', err.response?.data?.message || 'Failed to start call');
+      resetCallState();
+    }
+  };
+
+  const acceptIncomingCall = async () => {
+    if (!incomingCall || !socket) return;
+    setCallType(incomingCall.callType || 'video');
+    setCurrentCallRoom(incomingCall.roomId);
+    setCurrentCallId(incomingCall.callId);
+    setCallStatus('ongoing');
+    setIsInCall(true);
+    callStartTimeRef.current = Date.now();
+    startCallTimer();
+    stopRingtone();
+    await startWebRTC(incomingCall.roomId, false);
+    socket.emit('call-accept', { roomId: incomingCall.roomId, receiverId: currentUser.id, callId: incomingCall.callId });
+    setIncomingCall(null);
+  };
+
+  const declineIncomingCall = () => {
+    if (!incomingCall || !socket) return;
+    socket.emit('call-decline', { roomId: incomingCall.roomId, callId: incomingCall.callId });
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `missed-${Date.now()}`,
+        senderId: incomingCall.callerId,
+        createdAt: new Date().toISOString(),
+        isRead: true,
+        isCallHistory: true,
+        callDuration: 0,
+        callType: incomingCall.callType,
+        callDirection: 'missed',
+      },
+    ]);
+    setIncomingCall(null);
+    setCallStatus('idle');
+    stopRingtone();
+  };
+
+  const toggleAudio = () => {
+    const track = localStreamRef.current?.getAudioTracks?.()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      setIsAudioEnabled(track.enabled);
+      socket?.emit('call-toggle-audio', { roomId: currentCallRoom, enabled: track.enabled });
+    }
+  };
+
+  const toggleVideo = () => {
+    const track = localStreamRef.current?.getVideoTracks?.()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      setIsVideoEnabled(track.enabled);
+      socket?.emit('call-toggle-video', { roomId: currentCallRoom, enabled: track.enabled });
+    }
+  };
+
+  // ─── TEXT MESSAGES ─────────────────────────────────────────────
+  const handleInputChange = (text) => {
+    setMessageText(text);
+    if (socket && text.trim()) socket.emit('typing', { receiverId: userId });
   };
 
   const sendMessage = async () => {
     if (!messageText.trim()) return;
     const content = messageText.trim();
+    const tempId = `temp-${Date.now()}`;
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        content,
+        senderId: currentUser.id,
+        receiverId: userId,
+        createdAt: new Date().toISOString(),
+        isRead: false,
+      },
+    ]);
     setMessageText('');
+    scrollToBottom();
+    socket?.emit('send_message', { receiverId: userId, content });
 
     try {
       setIsSending(true);
       const response = await api.post('/messages', { receiverId: userId, content });
-      setMessages((prev) => [...prev, response.data.data]);
-      scrollToBottom();
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...response.data.data, content } : m)));
     } catch (err) {
       console.error('Send error:', err);
-      Alert.alert('Error', 'Failed to send message');
-      setMessageText(content);
+      Alert.alert('Error', err.response?.data?.message || 'Failed to send message');
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
     } finally {
       setIsSending(false);
     }
   };
 
-  const sendOffer = async () => {
-    if (!offerData.amount || !offerData.title) {
-      Alert.alert('Error', 'Please fill in the amount and title');
-      return;
-    }
-
-    try {
-      setIsSending(true);
-      const response = await api.post('/messages/offers', {
-        receiverId: userId,
-        amount: parseFloat(offerData.amount),
-        title: offerData.title,
-        description: offerData.description,
-        type: 'direct_hire',
-        durationDays: parseInt(offerData.durationDays) || 7,
-        revisions: parseInt(offerData.revisions) || 3,
-        deliverables: offerData.deliverables,
-      });
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: response.data.offer.messageId,
-          content: 'JOB OFFER',
-          senderId: currentUser.id,
-          createdAt: new Date().toISOString(),
-          isRead: false,
-          offer: response.data.offer,
-        },
-      ]);
-
-      setShowOfferModal(false);
-      setOfferData({ amount: '', title: '', description: '', durationDays: '7', revisions: '3', deliverables: [] });
-      setNewDeliverable('');
-      scrollToBottom();
-    } catch (err) {
-      console.error('Send offer error:', err);
-      Alert.alert('Error', err.response?.data?.message || 'Failed to send offer');
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  const deleteMessage = async (messageId) => {
-    Alert.alert('Delete Message', 'Are you sure you want to delete this message?', [
+  const deleteMessage = (messageId) => {
+    Alert.alert('Delete message?', 'This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -438,7 +589,7 @@ const ChatScreen = ({ route, navigation }) => {
           try {
             await api.delete(`/messages/${messageId}`);
             setMessages((prev) => prev.filter((m) => m.id !== messageId));
-          } catch (err) {
+          } catch {
             Alert.alert('Error', 'Failed to delete message');
           }
         },
@@ -446,77 +597,270 @@ const ChatScreen = ({ route, navigation }) => {
     ]);
   };
 
-  const acceptOffer = async (offerId) => {
+  const openFile = (url) => {
+    if (url) Linking.openURL(url).catch(() => Alert.alert('Error', 'Could not open file'));
+  };
+
+  // ─── FILE UPLOAD ───────────────────────────────────────────────
+  const pickAndSendFile = async () => {
+    if (!ImagePicker && !DocumentPicker) {
+      Alert.alert('Attachments unavailable', 'Install expo-image-picker / expo-document-picker to enable file sharing.');
+      return;
+    }
+    Alert.alert('Attach', 'Choose a file type', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Photo', onPress: pickImage },
+      { text: 'Document', onPress: pickDocument },
+    ]);
+  };
+
+  const uploadPickedFile = async (fileAsset, isImage) => {
+    const tempId = `file-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        senderId: currentUser.id,
+        createdAt: new Date().toISOString(),
+        isRead: false,
+        fileUrl: fileAsset.uri,
+        fileName: fileAsset.name || (isImage ? 'photo.jpg' : 'file'),
+        fileType: fileAsset.mimeType || (isImage ? 'image/jpeg' : 'application/octet-stream'),
+        isUploading: true,
+      },
+    ]);
+    scrollToBottom();
+
     try {
-      setIsSending(true);
-      await api.patch(`/messages/offers/${offerId}/accept`);
-      setMessages((prev) =>
-        prev.map((msg) => (msg.offer?.id === offerId ? { ...msg, offer: { ...msg.offer, status: 'accepted' } } : msg))
-      );
-      Alert.alert('Success', 'Offer accepted successfully!');
+      setUploadingFile(true);
+      const formData = new FormData();
+      formData.append('file', {
+        uri: fileAsset.uri,
+        name: fileAsset.name || (isImage ? 'photo.jpg' : 'file'),
+        type: fileAsset.mimeType || (isImage ? 'image/jpeg' : 'application/octet-stream'),
+      });
+      formData.append('receiverId', userId);
+
+      const response = await api.post('/messages/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...response.data.data, isUploading: false } : m)));
     } catch (err) {
-      Alert.alert('Error', err.response?.data?.message || 'Failed to accept offer');
+      console.error('Upload error:', err);
+      Alert.alert('Error', err.response?.data?.message || 'Failed to upload file');
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
     } finally {
-      setIsSending(false);
+      setUploadingFile(false);
+    }
+  };
+
+  const pickImage = async () => {
+    if (!ImagePicker) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      const a = result.assets[0];
+      uploadPickedFile({ uri: a.uri, name: a.fileName, mimeType: a.mimeType }, true);
+    }
+  };
+
+  const pickDocument = async () => {
+    if (!DocumentPicker) return;
+    const result = await DocumentPicker.getDocumentAsync({ type: ['application/pdf', 'image/*'] });
+    if (!result.canceled && result.assets?.[0]) {
+      const a = result.assets[0];
+      uploadPickedFile({ uri: a.uri, name: a.name, mimeType: a.mimeType }, a.mimeType?.startsWith('image/'));
+    }
+  };
+
+  // ─── OFFERS ────────────────────────────────────────────────────
+  const addDeliverable = () => setOfferData((p) => ({ ...p, deliverables: [...p.deliverables, ''] }));
+  const updateDeliverable = (i, v) =>
+    setOfferData((p) => {
+      const d = [...p.deliverables];
+      d[i] = v;
+      return { ...p, deliverables: d };
+    });
+  const removeDeliverable = (i) =>
+    setOfferData((p) => ({ ...p, deliverables: p.deliverables.filter((_, idx) => idx !== i) }));
+
+  const addMilestone = () => setMilestones((p) => [...p, { title: '', amount: '', dueDays: '' }]);
+  const updateMilestone = (i, field, v) =>
+    setMilestones((p) => {
+      const m = [...p];
+      m[i] = { ...m[i], [field]: v };
+      return m;
+    });
+  const removeMilestone = (i) => setMilestones((p) => p.filter((_, idx) => idx !== i));
+
+  const resetOfferForm = () => {
+    setOfferData({ amount: '', title: '', description: '', type: 'direct_hire', durationDays: '7', revisions: '3', deliverables: [''] });
+    setMilestones([]);
+  };
+
+  const sendOffer = async () => {
+    const amount = parseFloat(offerData.amount);
+    if (!amount || amount < 100) {
+      Alert.alert('Invalid amount', 'Minimum offer amount is ₦100');
+      return;
+    }
+    if (!offerData.title.trim()) {
+      Alert.alert('Missing title', 'Please add a title for this offer');
+      return;
+    }
+    const deliverablesList = offerData.deliverables.filter((d) => d.trim() !== '');
+
+    try {
+      setSendingOffer(true);
+      const response = await api.post('/messages/offers', {
+        receiverId: userId,
+        amount,
+        title: offerData.title,
+        description: offerData.description,
+        type: offerData.type,
+        durationDays: parseInt(offerData.durationDays) || 7,
+        revisions: parseInt(offerData.revisions) || 3,
+        deliverables: deliverablesList,
+        milestones: milestones.length > 0 ? milestones : undefined,
+      });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: response.data.offer.messageId,
+          senderId: currentUser.id,
+          createdAt: new Date().toISOString(),
+          isRead: false,
+          offer: response.data.offer,
+        },
+      ]);
+      setShowOfferModal(false);
+      resetOfferForm();
+      scrollToBottom();
+    } catch (err) {
+      console.error('Send offer error:', err);
+      Alert.alert('Error', err.response?.data?.message || 'Failed to send offer');
+    } finally {
+      setSendingOffer(false);
+    }
+  };
+
+  const acceptOffer = async (offerId) => {
+    setMessages((prev) => prev.map((m) => (m.offer?.id === offerId ? { ...m, offer: { ...m.offer, status: 'accepted' } } : m)));
+    try {
+      const response = await api.patch(`/messages/offers/${offerId}/accept`);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.offer?.id === offerId
+            ? { ...m, offer: { ...m.offer, status: 'accepted', contractId: response.data.contract?.id } }
+            : m
+        )
+      );
+      if (response.data.contract?.id) {
+        setTimeout(() => navigation.navigate('ContractDetail', { contractId: response.data.contract.id }), 600);
+      }
+    } catch (err) {
+      setMessages((prev) => prev.map((m) => (m.offer?.id === offerId ? { ...m, offer: { ...m.offer, status: 'pending' } } : m)));
+      const msg = err.response?.data?.message || 'Failed to accept offer';
+      if (err.response?.data?.code === 'INSUFFICIENT_BALANCE') {
+        Alert.alert(
+          'Insufficient balance',
+          `${msg} (Need ₦${err.response.data.required?.toLocaleString()}, have ₦${err.response.data.current?.toLocaleString()})`
+        );
+      } else {
+        Alert.alert('Error', msg);
+      }
     }
   };
 
   const rejectOffer = async (offerId) => {
+    setMessages((prev) => prev.map((m) => (m.offer?.id === offerId ? { ...m, offer: { ...m.offer, status: 'rejected' } } : m)));
     try {
-      setIsSending(true);
       await api.patch(`/messages/offers/${offerId}/reject`);
-      setMessages((prev) =>
-        prev.map((msg) => (msg.offer?.id === offerId ? { ...msg, offer: { ...msg.offer, status: 'rejected' } } : msg))
-      );
-    } catch (err) {
+    } catch {
+      setMessages((prev) => prev.map((m) => (m.offer?.id === offerId ? { ...m, offer: { ...m.offer, status: 'pending' } } : m)));
       Alert.alert('Error', 'Failed to reject offer');
-    } finally {
-      setIsSending(false);
     }
   };
 
-  const handleChatMenu = () => {
-    Alert.alert(
-      `${otherUser.firstName} ${otherUser.lastName}`,
-      undefined,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Archive Chat',
-          onPress: async () => {
-            try {
-              await api.post(`/messages/archive/${userId}`);
-              navigation.goBack();
-            } catch (err) {
-              Alert.alert('Error', 'Failed to archive');
-            }
-          },
+  const cancelOffer = (offerId) => {
+    Alert.alert('Cancel offer?', 'The recipient will be notified.', [
+      { text: 'Keep offer', style: 'cancel' },
+      {
+        text: 'Cancel offer',
+        style: 'destructive',
+        onPress: async () => {
+          setMessages((prev) => prev.map((m) => (m.offer?.id === offerId ? { ...m, offer: { ...m.offer, status: 'cancelled' } } : m)));
+          try {
+            await api.patch(`/messages/offers/${offerId}/cancel`);
+          } catch {
+            setMessages((prev) => prev.map((m) => (m.offer?.id === offerId ? { ...m, offer: { ...m.offer, status: 'pending' } } : m)));
+            Alert.alert('Error', 'Failed to cancel offer');
+          }
         },
-        {
-          text: 'Block Contact',
-          style: 'destructive',
-          onPress: async () => {
-            Alert.alert('Block Contact', `Block ${otherUser.firstName}? They won't be able to message you.`, [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Block',
-                style: 'destructive',
-                onPress: async () => {
-                  try {
-                    await api.post(`/messages/block/${userId}`);
-                    navigation.goBack();
-                  } catch (err) {
-                    Alert.alert('Error', 'Failed to block');
-                  }
-                },
-              },
-            ]);
-          },
-        },
-      ]
-    );
+      },
+    ]);
   };
 
+  // ─── ARCHIVE / BLOCK ───────────────────────────────────────────
+  const archiveConversation = async () => {
+    try {
+      await api.post(`/messages/archive/${userId}`);
+      navigation.goBack();
+    } catch {
+      Alert.alert('Error', 'Failed to archive conversation');
+    }
+  };
+
+  const blockContact = () => {
+    Alert.alert('Block contact', `Block ${otherUser?.firstName}? They won't be able to message or call you.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Block',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.post(`/messages/block/${userId}`);
+            navigation.goBack();
+          } catch {
+            Alert.alert('Error', 'Failed to block contact');
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleChatMenu = () => {
+    setShowChatMenu(false);
+    Alert.alert(`${otherUser?.firstName} ${otherUser?.lastName}`, undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Archive Chat', onPress: archiveConversation },
+      { text: 'Block Contact', style: 'destructive', onPress: blockContact },
+    ]);
+  };
+
+  // ─── DATE GROUPING ─────────────────────────────────────────────
+  const groupedData = React.useMemo(() => {
+    const groups = [];
+    let lastDateKey = null;
+    messages.forEach((msg) => {
+      const dateKey = new Date(msg.createdAt).toDateString();
+      if (dateKey !== lastDateKey) {
+        groups.push({ type: 'date', id: `date-${dateKey}`, label: formatDate(dateKey) });
+        lastDateKey = dateKey;
+      }
+      groups.push({ type: 'message', id: String(msg.id), msg });
+    });
+    return groups;
+  }, [messages]);
+
+  const FileIconFor = (fileType, isMe) => <FileText size={16} color={isMe ? C.white : C.slate600} strokeWidth={2} />;
+
+  // ─── RENDER ─────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -529,81 +873,136 @@ const ChatScreen = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <IncomingCallOverlay call={incomingCall} onAccept={acceptIncomingCall} onDecline={declineIncomingCall} />
+      <OutgoingCallOverlay
+        visible={isInCall && callStatus === 'ringing' && !incomingCall}
+        calleeFirstName={otherUser?.firstName}
+        calleeLastName={otherUser?.lastName}
+        calleeAvatar={otherUser?.avatar}
+        callType={callType}
+        onCancel={endLocalCall}
+      />
+      <ActiveCallOverlay
+        visible={isInCall && callStatus === 'ongoing'}
+        callType={callType}
+        duration={callDuration}
+        localStreamURL={localStreamURL}
+        remoteStreamURL={remoteStreamURL}
+        otherFirstName={otherUser?.firstName}
+        otherLastName={otherUser?.lastName}
+        otherAvatar={otherUser?.avatar}
+        isAudioEnabled={isAudioEnabled}
+        isVideoEnabled={isVideoEnabled}
+        onToggleAudio={toggleAudio}
+        onToggleVideo={toggleVideo}
+        onEnd={endLocalCall}
+        RTCViewComp={RTCView}
+      />
+
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBackBtn}>
-          <ChevronLeft size={24} color={C.slate700} strokeWidth={2.5} />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBackBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <ChevronLeft size={24} color={C.slate700} strokeWidth={2.4} />
         </TouchableOpacity>
 
-        <View style={styles.headerContent}>
-          <Text style={styles.headerName}>
-            {otherUser.firstName} {otherUser.lastName}
-          </Text>
-          <Text style={styles.headerStatus}>Active now</Text>
-        </View>
+        <TouchableOpacity
+          style={styles.headerIdentity}
+          onPress={() => navigation.navigate('Profile', { userId })}
+          activeOpacity={0.7}
+        >
+          <Avatar uri={otherUser?.avatar} firstName={otherUser?.firstName} lastName={otherUser?.lastName} size={38} />
+          <View style={{ flex: 1, minWidth: 0, marginLeft: 10 }}>
+            <View style={styles.headerNameRow}>
+              <Text style={styles.headerName} numberOfLines={1}>
+                {otherUser?.firstName} {otherUser?.lastName}
+              </Text>
+              {otherUser?.isVerified && <BadgeCheck size={13} color={C.blue500} strokeWidth={2.4} />}
+            </View>
+            <Text style={styles.headerStatus} numberOfLines={1}>
+              {typingUser ? `${typingUser} is typing…` : 'Active now'}
+            </Text>
+          </View>
+        </TouchableOpacity>
 
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerActionBtn}>
-            <Phone size={18} color={C.emerald600} strokeWidth={2.2} />
+          <TouchableOpacity style={styles.headerActionBtn} onPress={() => initiateCall('video')} disabled={isInCall}>
+            <Video size={18} color={isInCall ? C.slate300 : C.emerald600} strokeWidth={2.2} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerActionBtn}>
-            <Video size={18} color={C.emerald600} strokeWidth={2.2} />
+          <TouchableOpacity style={styles.headerActionBtn} onPress={() => initiateCall('audio')} disabled={isInCall}>
+            <PhoneCall size={17} color={isInCall ? C.slate300 : C.emerald600} strokeWidth={2.2} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerActionBtn} onPress={handleChatMenu}>
-            <MoreHorizontal size={18} color={C.slate500} strokeWidth={2} />
+            <MoreHorizontal size={18} color={C.slate500} strokeWidth={2.2} />
           </TouchableOpacity>
         </View>
       </View>
 
+      {/* Messages */}
       <FlatList
         ref={flatListRef}
-        data={messages}
-        renderItem={({ item: msg }) => {
+        data={groupedData}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => {
+          if (item.type === 'date') {
+            return (
+              <View style={styles.dateSeparator}>
+                <Text style={styles.dateSeparatorText}>{item.label}</Text>
+              </View>
+            );
+          }
+          const msg = item.msg;
           const isMe = msg.senderId === currentUser?.id;
-          const isOffer = !!msg.offer;
-          const isCallHistory = msg.isCallHistory;
 
-          return (
-            <View key={msg.id}>
-              {isCallHistory ? (
-                <CallHistoryBubble msg={msg} />
-              ) : isOffer ? (
+          if (msg.isCallHistory) {
+            return <CallHistoryBubble msg={msg} onCallBack={(type) => initiateCall(type)} />;
+          }
+          if (msg.offer) {
+            return (
+              <View style={{ alignItems: isMe ? 'flex-end' : 'flex-start', paddingHorizontal: 12 }}>
                 <OfferCard
                   offer={msg.offer}
                   isMe={isMe}
+                  otherUserFirstName={otherUser?.firstName}
+                  senderFirstName={isMe ? currentUser?.firstName : otherUser?.firstName}
                   onAccept={acceptOffer}
                   onReject={rejectOffer}
-                  onCancel={deleteMessage}
+                  onCancel={cancelOffer}
+                  onViewContract={(id) => navigation.navigate('ContractDetail', { contractId: id })}
                 />
-              ) : (
-                <MessageBubble msg={msg} isMe={isMe} onDelete={deleteMessage} />
-              )}
-            </View>
-          );
+              </View>
+            );
+          }
+          return <MessageBubble msg={msg} isMe={isMe} onDelete={deleteMessage} onOpenFile={openFile} FileIconFor={FileIconFor} />;
         }}
-        keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.messagesList}
-        onContentSizeChange={() => scrollToBottom()}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No messages yet</Text>
+            <Text style={styles.emptySubtitle}>Say hello to start the conversation</Text>
+          </View>
+        }
         showsVerticalScrollIndicator={false}
       />
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ backgroundColor: C.white }}>
+      {/* Input */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.inputWrap}>
-          <TouchableOpacity style={styles.iconBtn}>
-            <Paperclip size={20} color={C.slate500} strokeWidth={2} />
+          <TouchableOpacity style={styles.iconBtn} onPress={pickAndSendFile} disabled={uploadingFile}>
+            {uploadingFile ? <ActivityIndicator size="small" color={C.slate400} /> : <Paperclip size={19} color={C.slate500} strokeWidth={2} />}
           </TouchableOpacity>
 
           <TextInput
             style={styles.input}
-            placeholder={`Message ${otherUser.firstName}...`}
+            placeholder={`Message ${otherUser?.firstName || ''}…`}
             placeholderTextColor={C.slate400}
             value={messageText}
-            onChangeText={setMessageText}
+            onChangeText={handleInputChange}
             multiline
-            maxLength={1000}
+            maxLength={2000}
           />
 
           <TouchableOpacity style={styles.iconBtn} onPress={() => setShowOfferModal(true)}>
-            <HandCoins size={20} color={C.emerald600} strokeWidth={2} />
+            <HandCoins size={19} color={C.emerald600} strokeWidth={2} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -611,48 +1010,44 @@ const ChatScreen = ({ route, navigation }) => {
             onPress={sendMessage}
             disabled={!messageText.trim() || isSending}
           >
-            {isSending ? (
-              <ActivityIndicator size="small" color={C.white} />
-            ) : (
-              <Send size={18} color={C.white} strokeWidth={2.5} />
-            )}
+            {isSending ? <ActivityIndicator size="small" color={C.white} /> : <Send size={17} color={C.white} strokeWidth={2.4} />}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
 
-      {/* Compact, Keyboard-Aware Offer Modal */}
+      {/* Offer modal */}
       <Modal visible={showOfferModal} animationType="slide" transparent>
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-          style={{ flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)' }}
-        >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalBackdrop}>
           <SafeAreaView style={styles.modalContainer} edges={['top']}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Create Offer</Text>
-              <TouchableOpacity onPress={() => setShowOfferModal(false)} style={styles.modalCloseBtn}>
-                <X size={22} color={C.slate700} strokeWidth={2.5} />
+              <View>
+                <Text style={styles.modalTitle}>Send Offer</Text>
+                <Text style={styles.modalSubtitle}>
+                  To {otherUser?.firstName} {otherUser?.lastName}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowOfferModal(false)} style={styles.modalCloseBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <X size={20} color={C.slate600} strokeWidth={2.4} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView 
-              style={styles.modalContent} 
-              showsVerticalScrollIndicator={false} 
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: 32 }}
-            >
+            <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 36 }}>
+              {/* Amount */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Offer Amount (₦)</Text>
+                <Text style={styles.formLabel}>Amount (₦)</Text>
                 <TextInput
                   style={styles.formInput}
-                  placeholder="e.g. 50000"
+                  placeholder="50,000"
                   keyboardType="decimal-pad"
                   value={offerData.amount}
                   onChangeText={(v) => setOfferData({ ...offerData, amount: v })}
                 />
+                <Text style={styles.formHint}>Minimum ₦100</Text>
               </View>
 
+              {/* Title */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Job Title</Text>
+                <Text style={styles.formLabel}>Title</Text>
                 <TextInput
                   style={styles.formInput}
                   placeholder="e.g. Mobile App Development"
@@ -661,24 +1056,13 @@ const ChatScreen = ({ route, navigation }) => {
                 />
               </View>
 
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Description</Text>
-                <TextInput
-                  style={[styles.formInput, { minHeight: 80, textAlignVertical: 'top' }]}
-                  placeholder="Describe the scope of work..."
-                  multiline
-                  value={offerData.description}
-                  onChangeText={(v) => setOfferData({ ...offerData, description: v })}
-                />
-              </View>
-
+              {/* Duration / Revisions */}
               <View style={styles.formRow}>
                 <View style={[styles.formGroup, { flex: 1 }]}>
-                  <Text style={styles.formLabel}>Duration (Days)</Text>
+                  <Text style={styles.formLabel}>Duration (days)</Text>
                   <TextInput
                     style={styles.formInput}
                     keyboardType="number-pad"
-                    placeholder="7"
                     value={offerData.durationDays}
                     onChangeText={(v) => setOfferData({ ...offerData, durationDays: v })}
                   />
@@ -688,68 +1072,122 @@ const ChatScreen = ({ route, navigation }) => {
                   <TextInput
                     style={styles.formInput}
                     keyboardType="number-pad"
-                    placeholder="3"
                     value={offerData.revisions}
                     onChangeText={(v) => setOfferData({ ...offerData, revisions: v })}
                   />
                 </View>
               </View>
 
+              {/* Description */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Deliverables</Text>
-                <View style={styles.deliverableInputRow}>
-                  <TextInput
-                    style={styles.deliverableInput}
-                    placeholder="e.g. Source code"
-                    value={newDeliverable}
-                    onChangeText={setNewDeliverable}
-                    onSubmitEditing={() => {
-                      if (newDeliverable.trim()) {
-                        setOfferData({ ...offerData, deliverables: [...offerData.deliverables, newDeliverable.trim()] });
-                        setNewDeliverable('');
-                      }
-                    }}
-                  />
-                  <TouchableOpacity 
-                    style={styles.addDeliverableBtn}
-                    onPress={() => {
-                      if (newDeliverable.trim()) {
-                        setOfferData({ ...offerData, deliverables: [...offerData.deliverables, newDeliverable.trim()] });
-                        setNewDeliverable('');
-                      }
-                    }}
-                  >
-                    <Text style={styles.addDeliverableText}>Add</Text>
+                <Text style={styles.formLabel}>Description</Text>
+                <TextInput
+                  style={[styles.formInput, styles.formTextArea]}
+                  placeholder="Describe the work…"
+                  multiline
+                  value={offerData.description}
+                  onChangeText={(v) => setOfferData({ ...offerData, description: v })}
+                />
+              </View>
+
+              {/* Deliverables */}
+              <View style={styles.formGroup}>
+                <View style={styles.formSectionHead}>
+                  <Text style={styles.formLabel}>Deliverables</Text>
+                  <TouchableOpacity onPress={addDeliverable}>
+                    <Text style={styles.addLink}>+ Add</Text>
                   </TouchableOpacity>
                 </View>
-                <View style={styles.deliverablesList}>
-                  {offerData.deliverables.map((d, i) => (
-                    <View key={i} style={styles.deliverableChip}>
-                      <Text style={styles.deliverableChipText} numberOfLines={1}>{d}</Text>
-                      <TouchableOpacity 
-                        onPress={() => {
-                          const newDels = offerData.deliverables.filter((_, idx) => idx !== i);
-                          setOfferData({ ...offerData, deliverables: newDels });
-                        }}
-                        style={styles.chipRemoveBtn}
-                      >
-                        <X size={14} color={C.red500} strokeWidth={2} />
+                {offerData.deliverables.map((item, index) => (
+                  <View key={index} style={styles.deliverableRow}>
+                    <ListChecks size={15} color={C.slate400} strokeWidth={2} />
+                    <TextInput
+                      style={styles.deliverableInput}
+                      placeholder={`Deliverable ${index + 1}`}
+                      value={item}
+                      onChangeText={(v) => updateDeliverable(index, v)}
+                    />
+                    {offerData.deliverables.length > 1 && (
+                      <TouchableOpacity onPress={() => removeDeliverable(index)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                        <X size={15} color={C.slate400} strokeWidth={2} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+              </View>
+
+              {/* Milestones */}
+              <View style={styles.formGroup}>
+                <View style={styles.formSectionHead}>
+                  <Text style={styles.formLabel}>Milestones (optional)</Text>
+                  <TouchableOpacity onPress={addMilestone}>
+                    <Text style={styles.addLink}>+ Add</Text>
+                  </TouchableOpacity>
+                </View>
+                {milestones.map((m, index) => (
+                  <View key={index} style={styles.milestoneCard}>
+                    <View style={styles.formSectionHead}>
+                      <Text style={styles.milestoneCardLabel}>Milestone {index + 1}</Text>
+                      <TouchableOpacity onPress={() => removeMilestone(index)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                        <X size={14} color={C.slate400} strokeWidth={2} />
                       </TouchableOpacity>
                     </View>
-                  ))}
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="Title"
+                      value={m.title}
+                      onChangeText={(v) => updateMilestone(index, 'title', v)}
+                    />
+                    <View style={styles.formRow}>
+                      <TextInput
+                        style={[styles.formInput, { flex: 1 }]}
+                        placeholder="Amount (₦)"
+                        keyboardType="decimal-pad"
+                        value={m.amount}
+                        onChangeText={(v) => updateMilestone(index, 'amount', v)}
+                      />
+                      <TextInput
+                        style={[styles.formInput, { flex: 1 }]}
+                        placeholder="Due (days)"
+                        keyboardType="number-pad"
+                        value={m.dueDays}
+                        onChangeText={(v) => updateMilestone(index, 'dueDays', v)}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+
+              {/* Type */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Type</Text>
+                <View style={styles.typeRow}>
+                  {[
+                    { value: 'direct_hire', label: 'Direct Hire', Icon: Briefcase },
+                    { value: 'custom_job', label: 'Custom Job', Icon: Star },
+                    { value: 'milestone', label: 'Milestone', Icon: CheckCircle2 },
+                  ].map(({ value, label, Icon }) => {
+                    const active = offerData.type === value;
+                    return (
+                      <TouchableOpacity
+                        key={value}
+                        style={[styles.typeBtn, active && styles.typeBtnActive]}
+                        onPress={() => setOfferData({ ...offerData, type: value })}
+                      >
+                        <Icon size={16} color={active ? C.emerald600 : C.slate400} strokeWidth={2} />
+                        <Text style={[styles.typeBtnText, active && styles.typeBtnTextActive]}>{label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </View>
 
-              <TouchableOpacity
-                style={[styles.submitBtn, isSending && styles.submitBtnDisabled]}
-                onPress={sendOffer}
-                disabled={isSending}
-              >
-                {isSending ? (
+              <TouchableOpacity style={[styles.submitBtn, sendingOffer && styles.submitBtnDisabled]} onPress={sendOffer} disabled={sendingOffer}>
+                {sendingOffer ? (
                   <ActivityIndicator size="small" color={C.white} />
                 ) : (
                   <>
-                    <Send size={18} color={C.white} strokeWidth={2.5} />
+                    <HandCoins size={17} color={C.white} strokeWidth={2.2} />
                     <Text style={styles.submitBtnText}>Send Offer</Text>
                   </>
                 )}
@@ -762,9 +1200,6 @@ const ChatScreen = ({ route, navigation }) => {
   );
 };
 
-// ════════════════════════════════════════════════════════════════
-// STYLES
-// ════════════════════════════════════════════════════════════════
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.white },
   centerFill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -772,313 +1207,137 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: C.slate100,
     backgroundColor: C.white,
   },
-  headerBackBtn: { padding: 8, marginRight: 8 },
-  headerContent: { flex: 1 },
-  headerName: { fontSize: 16, fontWeight: '700', color: C.slate900, letterSpacing: 0.2 },
-  headerStatus: { fontSize: 12, color: C.emerald600, marginTop: 2, fontWeight: '500' },
-  headerActions: { flexDirection: 'row', gap: 12 },
+  headerBackBtn: { padding: 6, marginRight: 4 },
+  headerIdentity: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0 },
+  headerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  headerName: { fontSize: 15, fontWeight: '700', color: C.slate900 },
+  headerStatus: { fontSize: 11.5, color: C.emerald600, fontWeight: '600', marginTop: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   headerActionBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  messagesList: { paddingVertical: 12, flexGrow: 1 },
+  dateSeparator: { alignItems: 'center', marginVertical: 10 },
+  dateSeparatorText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.slate400,
     backgroundColor: C.slate50,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
   },
 
-  messagesList: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 16 },
-  messageContainer: { marginVertical: 6, maxWidth: '85%' },
-  messageBubble: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  msgText: { fontSize: 15, lineHeight: 22 },
-  msgMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, paddingHorizontal: 4 },
-  msgTime: { fontSize: 11, fontWeight: '500' },
-  msgReadReceipt: { marginLeft: 2 },
-  msgDeleteBtn: { marginTop: 4, padding: 4, alignSelf: 'flex-end' },
-
-  msgImageFile: { width: 200, height: 200, borderRadius: 12, marginBottom: 8 },
-  msgFileNameText: { fontSize: 12, fontWeight: '600' },
-  msgFileWrap: { flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 180 },
-  msgFileIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  msgFileName: { fontSize: 13, fontWeight: '600', flex: 1 },
-  downloadLink: { fontSize: 12, fontWeight: '600', marginTop: 4 },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 },
+  emptyTitle: { fontSize: 15, fontWeight: '700', color: C.slate700 },
+  emptySubtitle: { fontSize: 12.5, color: C.slate400, marginTop: 4 },
 
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: C.slate100,
     backgroundColor: C.white,
   },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.slate50,
-    marginBottom: 2,
-  },
+  iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   input: {
     flex: 1,
     backgroundColor: C.slate50,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 15,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    fontSize: 14.5,
     color: C.slate900,
-    maxHeight: 120,
-    lineHeight: 20,
+    maxHeight: 110,
   },
   sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: C.emerald500,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: C.emerald600,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
   },
   sendBtnDisabled: { backgroundColor: C.slate200 },
 
-  offerCard: {
-    borderRadius: 16,
-    padding: 16,
-    marginVertical: 8,
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  offerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingBottom: 12,
-    marginBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: C.slate100,
-  },
-  offerIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  offerLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
-  offerTitle: { fontSize: 15, fontWeight: '700', marginTop: 2 },
-  offerAmountWrap: { marginBottom: 16 },
-  offerAmountLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-  offerAmountValue: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
-  offerGrid: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  offerGridItem: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  offerGridLabel: { fontSize: 11, fontWeight: '600', color: C.slate500 },
-  offerGridValue: { fontSize: 13, fontWeight: '700', color: C.slate800, marginTop: 2 },
-  offerSection: { marginBottom: 12 },
-  offerSectionTitle: { fontSize: 12, fontWeight: '700', color: C.slate500, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
-  offerSectionText: { fontSize: 14, lineHeight: 20, color: C.slate700 },
-  delItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
-  delText: { fontSize: 13, color: C.slate700, flex: 1, lineHeight: 18 },
-
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginBottom: 16,
-    alignSelf: 'flex-start',
-  },
-  statusText: { fontSize: 12, fontWeight: '700' },
-
-  offerActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
-  acceptBtn: {
-    flex: 1.5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    backgroundColor: C.emerald500,
-    borderRadius: 12,
-  },
-  acceptBtnText: { color: C.white, fontWeight: '700', fontSize: 14 },
-  rejectBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    backgroundColor: C.white,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: C.slate200,
-  },
-  rejectBtnText: { color: C.slate600, fontWeight: '700', fontSize: 14 },
-  cancelOfferBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    backgroundColor: C.red50,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.red100,
-  },
-  cancelOfferBtnText: { color: C.red600, fontWeight: '700', fontSize: 13 },
-  protectedWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 12,
-    marginTop: 4,
-  },
-  protectedText: { fontSize: 12, fontWeight: '700' },
-
-  callHistoryBubble: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  callIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  callHistoryText: { fontSize: 13, fontWeight: '700' },
-  callHistorySubtext: { fontSize: 12, color: C.slate500, marginTop: 2 },
-  callBackBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: C.emerald50,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Modal Styles (Optimized for height and closeability)
-  modalContainer: { 
-    flex: 1, 
-    backgroundColor: C.white,
-  },
+  // Offer modal
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)' },
+  modalContainer: { flex: 1, marginTop: 60, backgroundColor: C.white, borderTopLeftRadius: 22, borderTopRightRadius: 22, overflow: 'hidden' },
   modalHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: 18,
+    paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: C.slate100,
-    backgroundColor: C.white,
   },
-  modalTitle: { fontSize: 18, fontWeight: '800', color: C.slate900 },
-  modalCloseBtn: { 
-    padding: 8, 
-    backgroundColor: C.slate100,
-    borderRadius: 20,
-  },
-  modalContent: { 
-    flex: 1, 
-    paddingHorizontal: 20, 
-    paddingTop: 20,
-  },
+  modalTitle: { fontSize: 17, fontWeight: '800', color: C.slate900 },
+  modalSubtitle: { fontSize: 12, color: C.slate400, marginTop: 2 },
+  modalCloseBtn: { padding: 6, backgroundColor: C.slate100, borderRadius: 999 },
+  modalContent: { flex: 1, paddingHorizontal: 20, paddingTop: 18 },
+
   formGroup: { marginBottom: 16 },
-  formRow: { flexDirection: 'row', gap: 16, marginBottom: 0 },
-  formLabel: { fontSize: 13, fontWeight: '700', color: C.slate700, marginBottom: 8, letterSpacing: 0.2 },
+  formRow: { flexDirection: 'row', gap: 12 },
+  formLabel: { fontSize: 12.5, fontWeight: '700', color: C.slate700, marginBottom: 7 },
+  formHint: { fontSize: 11, color: C.slate400, marginTop: 5 },
   formInput: {
     backgroundColor: C.slate50,
     borderWidth: 1,
     borderColor: C.slate200,
-    borderRadius: 10,
-    paddingHorizontal: 14,
+    borderRadius: 12,
+    paddingHorizontal: 13,
     fontSize: 14,
     color: C.slate900,
     height: 44,
+    marginBottom: 10,
   },
-  
-  // Compact Deliverables
-  deliverableInputRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  formTextArea: { height: 84, paddingTop: 10, textAlignVertical: 'top' },
+  formSectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  addLink: { fontSize: 12.5, fontWeight: '700', color: C.emerald600 },
+  deliverableRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 9 },
   deliverableInput: {
     flex: 1,
     backgroundColor: C.slate50,
     borderWidth: 1,
     borderColor: C.slate200,
     borderRadius: 10,
-    paddingHorizontal: 14,
-    fontSize: 14,
+    paddingHorizontal: 12,
+    height: 40,
+    fontSize: 13.5,
     color: C.slate900,
-    height: 44,
   },
-  addDeliverableBtn: {
-    backgroundColor: C.emerald50,
-    borderWidth: 1,
-    borderColor: C.emerald200,
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    justifyContent: 'center',
+  milestoneCard: { backgroundColor: C.slate50, borderRadius: 12, borderWidth: 1, borderColor: C.slate100, padding: 12, marginBottom: 10 },
+  milestoneCardLabel: { fontSize: 11.5, fontWeight: '700', color: C.slate500 },
+  typeRow: { flexDirection: 'row', gap: 8 },
+  typeBtn: {
+    flex: 1,
     alignItems: 'center',
-    height: 44,
-  },
-  addDeliverableText: { color: C.emerald700, fontWeight: '700', fontSize: 13 },
-  deliverablesList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  deliverableChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.slate100,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
     gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.slate200,
+    backgroundColor: C.slate50,
   },
-  deliverableChipText: { fontSize: 12, fontWeight: '600', color: C.slate700, maxWidth: 200 },
-  chipRemoveBtn: { padding: 2 },
+  typeBtnActive: { borderColor: C.emerald300, backgroundColor: C.emerald50 },
+  typeBtnText: { fontSize: 11.5, fontWeight: '600', color: C.slate500 },
+  typeBtnTextActive: { color: C.emerald700 },
 
   submitBtn: {
     flexDirection: 'row',
@@ -1086,17 +1345,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: C.emerald600,
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginTop: 12,
-    shadowColor: C.emerald600,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+    borderRadius: 14,
+    paddingVertical: 15,
+    marginTop: 6,
   },
-  submitBtnDisabled: { backgroundColor: C.slate300, shadowOpacity: 0 },
-  submitBtnText: { color: C.white, fontWeight: '700', fontSize: 16, letterSpacing: 0.2 },
+  submitBtnDisabled: { opacity: 0.6 },
+  submitBtnText: { color: C.white, fontWeight: '700', fontSize: 14.5 },
 });
 
 export default ChatScreen;
