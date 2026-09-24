@@ -247,10 +247,8 @@ const ContractDetailScreen = ({ route, navigation }) => {
   useEffect(() => {
     fetchContract();
     checkIfReviewed();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contractId]);
 
-  // Deadline countdown (Auto-cancel logic REMOVED as requested)
   useEffect(() => {
     if (!contract?.deadline) return;
     const tick = () => {
@@ -272,7 +270,6 @@ const ContractDetailScreen = ({ route, navigation }) => {
     return () => clearInterval(interval);
   }, [contract?.deadline]);
 
-  // Dispute window countdown
   useEffect(() => {
     if (!contract?.disputeWindowEndsAt) return;
     const tick = () => {
@@ -681,13 +678,17 @@ const ContractDetailScreen = ({ route, navigation }) => {
   const deliveryCountdown = getDeliveryCountdown();
   const expectedDeliveryDate = getExpectedDeliveryDate();
 
-  const chipActions = [];
-  if (canComplete) chipActions.push({ key: 'complete', label: completing ? 'Completing…' : 'Confirm Delivery', icon: CheckCircle2, onPress: handleComplete, bg: C.emerald600, fg: C.white, loading: completing });
-  if (canRequestRevision) chipActions.push({ key: 'revision', label: 'Request Revision', icon: RotateCcw, onPress: () => setShowRevisionModal(true), bg: C.white, fg: C.slate700, border: C.slate200 });
-  if (canFileDispute) chipActions.push({ key: 'dispute', label: 'File Dispute', icon: Gavel, onPress: () => setShowDisputeModal(true), bg: C.white, fg: C.purple600, border: C.purple200 });
-  if (canRequestExtension) chipActions.push({ key: 'extension', label: 'Request Extension', icon: Hourglass, onPress: () => setShowExtensionModal(true), bg: C.white, fg: C.amber600, border: C.amber200 });
-  if (canSendTip) chipActions.push({ key: 'tip', label: 'Send Tip', icon: Gift, onPress: () => setShowTipModal(true), bg: C.pink500, fg: C.white });
-  if (canCancel) chipActions.push({ key: 'cancel', label: cancelling ? 'Cancelling…' : 'Cancel', icon: XCircle, onPress: handleCancel, bg: C.white, fg: C.red600, border: C.red200, loading: cancelling });
+  // Define actions with new cleaner styling
+  const mainActions = [];
+  const secondaryActions = [];
+
+  if (canComplete) mainActions.push({ key: 'complete', label: 'Confirm Delivery', icon: CheckCircle2, onPress: handleComplete, loading: completing });
+  if (canPay) mainActions.push({ key: 'pay', label: 'Pay Now', icon: CreditCard, onPress: handlePay, loading: paying });
+  if (canRequestRevision) secondaryActions.push({ key: 'revision', label: 'Request Revision', icon: RotateCcw, onPress: () => setShowRevisionModal(true) });
+  if (canRequestExtension) secondaryActions.push({ key: 'extension', label: 'Request Extension', icon: Hourglass, onPress: () => setShowExtensionModal(true) });
+  if (canFileDispute) secondaryActions.push({ key: 'dispute', label: 'File Dispute', icon: Gavel, onPress: () => setShowDisputeModal(true) });
+  if (canSendTip) secondaryActions.push({ key: 'tip', label: 'Send Tip', icon: Gift, onPress: () => setShowTipModal(true) });
+  if (canCancel) secondaryActions.push({ key: 'cancel', label: 'Cancel Contract', icon: XCircle, onPress: handleCancel, loading: cancelling });
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -713,7 +714,7 @@ const ContractDetailScreen = ({ route, navigation }) => {
             {timeLeft && !timeLeft.expired && ['active', 'revision_requested'].includes(contract.status) && (
               <View style={[styles.statusBadge, { backgroundColor: C.amber50, borderColor: C.amber200 }]}>
                 <Timer size={13} color={C.amber600} strokeWidth={2.5} />
-                <Text style={[styles.statusBadgeText, { color: C.amber700 }]}>{timeLeft.days}d {timeLeft.hours}h left</Text>
+                <Text style={[styles.statusBadgeText, { color: C.amber700 }]}>{timeLeft.days}d {timeLeft.hours}h</Text>
               </View>
             )}
           </View>
@@ -724,23 +725,54 @@ const ContractDetailScreen = ({ route, navigation }) => {
         </View>
       </View>
 
-      {/* Action chips */}
-      {chipActions.length > 0 && (
-        <View style={styles.chipBar}>
-          <View style={styles.chipBarContent}>
-            {chipActions.map((a) => (
-              <TouchableOpacity
-                key={a.key}
-                style={[styles.actionChip, { backgroundColor: a.bg, borderColor: a.border || a.bg }]}
-                onPress={a.onPress}
-                disabled={a.loading}
-                activeOpacity={0.8}
-              >
-                {a.loading ? <ActivityIndicator size="small" color={a.fg} /> : <a.icon size={15} color={a.fg} strokeWidth={2.2} />}
-                <Text style={[styles.actionChipText, { color: a.fg }]}>{a.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+      {/* Action Buttons */}
+      {(mainActions.length > 0 || secondaryActions.length > 0) && (
+        <View style={styles.actionSection}>
+          {mainActions.length > 0 && (
+            <View style={styles.mainActionsContainer}>
+              {mainActions.map((action) => (
+                <TouchableOpacity
+                  key={action.key}
+                  style={[styles.primaryActionBtn]}
+                  onPress={action.onPress}
+                  disabled={action.loading}
+                  activeOpacity={0.85}
+                >
+                  {action.loading ? (
+                    <ActivityIndicator size="small" color={C.white} />
+                  ) : (
+                    <>
+                      <action.icon size={18} color={C.white} strokeWidth={2} />
+                      <Text style={styles.primaryActionBtnText}>{action.label}</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {secondaryActions.length > 0 && (
+            <View style={styles.secondaryActionsContainer}>
+              {secondaryActions.map((action) => (
+                <TouchableOpacity
+                  key={action.key}
+                  style={[styles.secondaryActionBtn]}
+                  onPress={action.onPress}
+                  disabled={action.loading}
+                  activeOpacity={0.8}
+                >
+                  {action.loading ? (
+                    <ActivityIndicator size="small" color={C.slate700} />
+                  ) : (
+                    <>
+                      <action.icon size={16} color={C.slate700} strokeWidth={2} />
+                      <Text style={styles.secondaryActionBtnText}>{action.label}</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
       )}
 
@@ -758,12 +790,12 @@ const ContractDetailScreen = ({ route, navigation }) => {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.alertTitle}>
-                  {pendingExtension.status.toLowerCase() === 'pending' ? 'Extension Request' : pendingExtension.status.toLowerCase() === 'approved' ? 'Extension Approved' : 'Extension Rejected'}
+                  {pendingExtension.status.toLowerCase() === 'pending' ? 'Extension Request Pending' : pendingExtension.status.toLowerCase() === 'approved' ? 'Extension Approved' : 'Extension Rejected'}
                 </Text>
                 <Text style={styles.alertText}>
                   {isFreelancer
-                    ? `You requested a ${pendingExtension.days || '?'} day extension${pendingExtension.reason ? `: "${pendingExtension.reason}"` : ''}`
-                    : `${contract.freelancer?.firstName || 'Freelancer'} requested a ${pendingExtension.days || '?'} day extension${pendingExtension.reason ? `: "${pendingExtension.reason}"` : ''}`}
+                    ? `You requested a ${pendingExtension.days || '?'} day extension`
+                    : `${contract.freelancer?.firstName || 'Freelancer'} requested a ${pendingExtension.days || '?'} day extension`}
                 </Text>
                 {isBuyer && pendingExtension.status.toLowerCase() === 'pending' && (
                   <View style={styles.alertActions}>
@@ -861,13 +893,6 @@ const ContractDetailScreen = ({ route, navigation }) => {
               <Scale size={14} color={C.white} />
               <Text style={styles.disputeWindowText}>Dispute window: {disputeWindowTime?.days || 0}d {disputeWindowTime?.hours || 0}h left</Text>
             </View>
-          )}
-
-          {canPay && (
-            <TouchableOpacity style={styles.payBtn} onPress={handlePay} disabled={paying} activeOpacity={0.85}>
-              {paying ? <ActivityIndicator size="small" color={C.emerald600} /> : <CreditCard size={16} color={C.emerald600} strokeWidth={2.5} />}
-              <Text style={styles.payBtnText}>{paying ? 'Processing…' : 'Pay Now'}</Text>
-            </TouchableOpacity>
           )}
 
           <View style={styles.escrowFeatures}>
@@ -1182,7 +1207,7 @@ const ContractDetailScreen = ({ route, navigation }) => {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
                 <View style={[styles.modalIconWrap, { backgroundColor: C.orange100 }]}><RotateCcw size={20} color={C.orange600} strokeWidth={2} /></View>
                 <View><Text style={styles.modalTitle}>Request Revision</Text><Text style={styles.modalSubtitle}>{revisionsLeft} revision{revisionsLeft !== 1 ? 's' : ''} remaining</Text></View>
               </View>
@@ -1194,8 +1219,8 @@ const ContractDetailScreen = ({ route, navigation }) => {
                 <TextInput style={styles.textArea} placeholder="Describe what needs to be changed..." placeholderTextColor={C.slate400} value={revisionFeedback} onChangeText={setRevisionFeedback} multiline numberOfLines={4} />
               </View>
               <View style={styles.modalActions}>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.slate100 }]} onPress={() => setShowRevisionModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.orange500 }]} disabled={requestingRevision || !revisionFeedback.trim()} onPress={handleRequestRevision}>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSecondary]} onPress={() => setShowRevisionModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} disabled={requestingRevision || !revisionFeedback.trim()} onPress={handleRequestRevision}>
                   {requestingRevision ? <ActivityIndicator size="small" color={C.white} /> : <><RotateCcw size={18} color={C.white} strokeWidth={2} /><Text style={styles.modalBtnText}>Request Revision</Text></>}
                 </TouchableOpacity>
               </View>
@@ -1209,7 +1234,7 @@ const ContractDetailScreen = ({ route, navigation }) => {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
                 <View style={[styles.modalIconWrap, { backgroundColor: C.amber100 }]}><Hourglass size={20} color={C.amber600} strokeWidth={2} /></View>
                 <View><Text style={styles.modalTitle}>Request Extension</Text><Text style={styles.modalSubtitle}>Ask client for more time</Text></View>
               </View>
@@ -1225,8 +1250,8 @@ const ContractDetailScreen = ({ route, navigation }) => {
                 <TextInput style={styles.textArea} placeholder="Explain why you need more time..." placeholderTextColor={C.slate400} value={extensionReason} onChangeText={setExtensionReason} multiline numberOfLines={3} />
               </View>
               <View style={styles.modalActions}>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.slate100 }]} onPress={() => setShowExtensionModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.amber500 }]} disabled={requestingExtension} onPress={handleRequestExtension}>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSecondary]} onPress={() => setShowExtensionModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} disabled={requestingExtension} onPress={handleRequestExtension}>
                   {requestingExtension ? <ActivityIndicator size="small" color={C.white} /> : <><Hourglass size={18} color={C.white} strokeWidth={2} /><Text style={styles.modalBtnText}>Request</Text></>}
                 </TouchableOpacity>
               </View>
@@ -1240,7 +1265,7 @@ const ContractDetailScreen = ({ route, navigation }) => {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
                 <View style={[styles.modalIconWrap, { backgroundColor: C.pink100 }]}><Gift size={20} color={C.pink600} strokeWidth={2} /></View>
                 <View><Text style={styles.modalTitle}>Send a Tip</Text><Text style={styles.modalSubtitle}>Optional appreciation for great work</Text></View>
               </View>
@@ -1253,16 +1278,16 @@ const ContractDetailScreen = ({ route, navigation }) => {
                 </Text>
               </View>
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Amount (₦)</Text>
-                <TextInput style={styles.formInput} keyboardType="decimal-pad" placeholder="Min ₦500" placeholderTextColor={C.slate400} value={tipAmount} onChangeText={setTipAmount} />
+                <Text style={styles.inputLabel}>Amount (NGN)</Text>
+                <TextInput style={styles.formInput} keyboardType="decimal-pad" placeholder="Min 500" placeholderTextColor={C.slate400} value={tipAmount} onChangeText={setTipAmount} />
               </View>
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Message (optional)</Text>
                 <TextInput style={styles.textArea} placeholder="Add a personal note..." placeholderTextColor={C.slate400} value={tipMessage} onChangeText={setTipMessage} multiline numberOfLines={2} />
               </View>
               <View style={styles.modalActions}>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.slate100 }]} onPress={() => setShowTipModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.pink500 }]} disabled={sendingTip || !tipAmount || parseFloat(tipAmount) < 500} onPress={handleSendTip}>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSecondary]} onPress={() => setShowTipModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary, { backgroundColor: C.pink500 }]} disabled={sendingTip || !tipAmount || parseFloat(tipAmount) < 500} onPress={handleSendTip}>
                   {sendingTip ? <ActivityIndicator size="small" color={C.white} /> : <><Gift size={18} color={C.white} strokeWidth={2} /><Text style={styles.modalBtnText}>Send Tip</Text></>}
                 </TouchableOpacity>
               </View>
@@ -1276,7 +1301,7 @@ const ContractDetailScreen = ({ route, navigation }) => {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
                 <View style={[styles.modalIconWrap, { backgroundColor: C.purple100 }]}><Gavel size={20} color={C.purple600} strokeWidth={2} /></View>
                 <View><Text style={styles.modalTitle}>File a Dispute</Text><Text style={styles.modalSubtitle}>Admin will review and decide</Text></View>
               </View>
@@ -1307,8 +1332,8 @@ const ContractDetailScreen = ({ route, navigation }) => {
                 ))}
               </View>
               <View style={styles.modalActions}>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.slate100 }]} onPress={() => setShowDisputeModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.purple600 }]} disabled={filingDispute || disputeReason.trim().length < 10} onPress={handleFileDispute}>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSecondary]} onPress={() => setShowDisputeModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary, { backgroundColor: C.purple600 }]} disabled={filingDispute || disputeReason.trim().length < 10} onPress={handleFileDispute}>
                   {filingDispute ? <ActivityIndicator size="small" color={C.white} /> : <><Gavel size={18} color={C.white} strokeWidth={2} /><Text style={styles.modalBtnText}>File Dispute</Text></>}
                 </TouchableOpacity>
               </View>
@@ -1322,7 +1347,7 @@ const ContractDetailScreen = ({ route, navigation }) => {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
                 <View style={[styles.modalIconWrap, { backgroundColor: C.purple100 }]}><MessageSquare size={20} color={C.purple600} strokeWidth={2} /></View>
                 <View><Text style={styles.modalTitle}>Add Reply</Text><Text style={styles.modalSubtitle}>Respond with evidence</Text></View>
               </View>
@@ -1347,8 +1372,8 @@ const ContractDetailScreen = ({ route, navigation }) => {
                 ))}
               </View>
               <View style={styles.modalActions}>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.slate100 }]} onPress={() => setShowReplyModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.modalBtn, { backgroundColor: C.purple600 }]} disabled={submittingReply || (!replyContent.trim() && replyFiles.length === 0)} onPress={handleAddReply}>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSecondary]} onPress={() => setShowReplyModal(false)}><Text style={[styles.modalBtnText, { color: C.slate700 }]}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary, { backgroundColor: C.purple600 }]} disabled={submittingReply || (!replyContent.trim() && replyFiles.length === 0)} onPress={handleAddReply}>
                   {submittingReply ? <ActivityIndicator size="small" color={C.white} /> : <><Send size={18} color={C.white} strokeWidth={2} /><Text style={styles.modalBtnText}>Submit Reply</Text></>}
                 </TouchableOpacity>
               </View>
@@ -1427,33 +1452,57 @@ const styles = StyleSheet.create({
     color: C.slate400 
   },
 
-  chipBar: { 
-    backgroundColor: C.white, 
-    borderBottomWidth: 1, 
-    borderBottomColor: C.slate100,
+  actionSection: { 
+    backgroundColor: C.white,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.slate100,
+    gap: 12,
   },
-  chipBarContent: { 
-    gap: 8,
-    flexWrap: 'wrap',
+  mainActionsContainer: {
+    gap: 10,
+  },
+  primaryActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
+    gap: 10,
+    backgroundColor: C.emerald600,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    minHeight: 48,
   },
-  actionChip: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'center',
-    gap: 6, 
-    paddingHorizontal: 12, 
-    paddingVertical: 10, 
-    borderRadius: 10, 
-    borderWidth: 1.5,
-    minHeight: 40,
-  },
-  actionChipText: { 
-    fontSize: 12, 
+  primaryActionBtnText: {
+    color: C.white,
+    fontSize: 14,
     fontWeight: '700',
-    textAlign: 'center',
+  },
+  secondaryActionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  secondaryActionBtn: {
+    flex: 1,
+    minWidth: '48%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: C.slate50,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: C.slate200,
+    minHeight: 44,
+  },
+  secondaryActionBtnText: {
+    color: C.slate700,
+    fontSize: 12.5,
+    fontWeight: '700',
   },
 
   scrollView: { flex: 1 },
@@ -1691,21 +1740,6 @@ const styles = StyleSheet.create({
     fontSize: 11.5, 
     color: C.white, 
     fontWeight: '600' 
-  },
-  payBtn: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    gap: 8, 
-    backgroundColor: C.white, 
-    paddingVertical: 12, 
-    borderRadius: 10, 
-    marginBottom: 14,
-  },
-  payBtnText: { 
-    color: C.emerald600, 
-    fontWeight: '800', 
-    fontSize: 13 
   },
   escrowFeatures: { 
     gap: 6,
@@ -2204,6 +2238,12 @@ const styles = StyleSheet.create({
     gap: 8, 
     paddingVertical: 13, 
     borderRadius: 10 
+  },
+  modalBtnPrimary: {
+    backgroundColor: C.emerald600,
+  },
+  modalBtnSecondary: {
+    backgroundColor: C.slate100,
   },
   modalBtnText: { 
     color: C.white, 
