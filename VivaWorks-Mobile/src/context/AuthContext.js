@@ -11,22 +11,28 @@ export const useAuth = () => {
   return context;
 };
 
-// Helper to extract error details from API response
+// 🎯 SAFE FALLBACKS: Prevents crashes if CONFIG.STORAGE_KEYS is undefined
+const KEYS = {
+  AUTH_TOKEN: CONFIG.STORAGE_KEYS?.AUTH_TOKEN || '@vivaworks_auth_token',
+  REFRESH_TOKEN: CONFIG.STORAGE_KEYS?.REFRESH_TOKEN || '@vivaworks_refresh_token',
+  USER_DATA: CONFIG.STORAGE_KEYS?.USER_DATA || '@vivaworks_user_data',
+};
+
 const extractError = (error, defaultMessage) => {
   if (!error.response) {
     return {
       success: false,
-      error: 'Network error. Please check your internet connection.',
+      error: error.friendlyMessage || 'Network error. Please check your internet connection.',
       code: 'NETWORK_ERROR',
     };
   }
 
   const { data, status } = error.response;
-  
+
   return {
     success: false,
-    error: data?.message || defaultMessage,
-    code: data?.code || 'UNKNOWN_ERROR',
+    error: error.friendlyMessage || data?.message || defaultMessage,
+    code: error.code || data?.code || 'UNKNOWN_ERROR',
     status: status,
     errors: data?.errors || null,
   };
@@ -35,7 +41,7 @@ const extractError = (error, defaultMessage) => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
-  const [isLoading, setIsLoading] = useState(true); // Controls Splash Screen
+  const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
@@ -44,95 +50,103 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthState = async () => {
     try {
-      const [storedToken, storedUser] = await Promise.all([
-        AsyncStorage.getItem(CONFIG.STORAGE_KEYS.AUTH_TOKEN),
-        AsyncStorage.getItem(CONFIG.STORAGE_KEYS.USER_DATA),
+      const [storedToken, storedRefreshToken, storedUser] = await Promise.all([
+        AsyncStorage.getItem(KEYS.AUTH_TOKEN),
+        AsyncStorage.getItem(KEYS.REFRESH_TOKEN),
+        AsyncStorage.getItem(KEYS.USER_DATA),
       ]);
+
+      if (!storedRefreshToken) {
+        await AsyncStorage.multiRemove([KEYS.AUTH_TOKEN, KEYS.USER_DATA]);
+        setIsLoading(false);
+        return;
+      }
 
       if (storedToken && storedUser) {
         setToken(storedToken);
-        setIsAuthenticated(true);
-        
-        // 🚨 CRITICAL FIX: Parse and set the user IMMEDIATELY from storage.
-        // This prevents the "undefined" UI flash or permanent undefined state on reload.
+
         try {
           const parsedUser = JSON.parse(storedUser);
           setUser(parsedUser);
+
+          // 🎯 NEW: If the stored user is not verified, don't mark as fully authenticated yet
+          if (parsedUser.isVerified === false) {
+            console.log('⚠️ Stored user requires email verification');
+            // We leave isAuthenticated as false so the app knows they aren't fully logged in
+          } else {
+            setIsAuthenticated(true);
+            await fetchUserProfile();
+          }
         } catch (parseError) {
           console.error('Error parsing stored user data:', parseError);
-          // If the stored data is corrupted, clear it to prevent future issues
-          await AsyncStorage.removeItem(CONFIG.STORAGE_KEYS.USER_DATA);
+          await AsyncStorage.removeItem(KEYS.USER_DATA);
         }
-
-        // Then, fetch fresh data in the background to update the cache
-        await fetchUserProfile();
       }
     } catch (error) {
       console.error('Error checking auth state:', error);
     } finally {
-      setIsLoading(false); // Hide splash after initial check
+      setIsLoading(false);
     }
   };
 
   const fetchUserProfile = async () => {
     try {
       const response = await api.get('/auth/me');
-      
-      // Handle backend returning { user: { ... } }
+
       if (response.data?.user) {
         setUser(response.data.user);
-        await AsyncStorage.setItem(
-          CONFIG.STORAGE_KEYS.USER_DATA,
-          JSON.stringify(response.data.user)
-        );
-      } 
-      // Fallback: Handle backend returning { id: 1, firstName: "John", ... } directly
-      else if (response.data?.id || response.data?.email) {
+        await AsyncStorage.setItem(KEYS.USER_DATA, JSON.stringify(response.data.user));
+      } else if (response.data?.id || response.data?.email) {
         setUser(response.data);
-        await AsyncStorage.setItem(
-          CONFIG.STORAGE_KEYS.USER_DATA,
-          JSON.stringify(response.data)
-        );
+        await AsyncStorage.setItem(KEYS.USER_DATA, JSON.stringify(response.data));
       }
     } catch (error) {
       console.error('Error fetching user profile:', error);
-      
-      // 🚨 CRITICAL FIX: ONLY logout if it's a definitive 401 Unauthorized (token is actually invalid).
-      // If it's a network error (e.g., user is offline), we keep the cached user 
-      // so the app doesn't break and show "undefined".
-      if (error.response?.status === 401) {
-        console.log('Token invalid or expired. Logging out...');
+      const isSessionExpired = error.response?.status === 401 || error.code === 'SESSION_EXPIRED';
+
+      if (isSessionExpired) {
+        console.log('Session expired. Logging out...');
         await logout();
       }
     }
   };
 
+  const persistSession = async (accessToken, refreshToken, userData) => {
+    const sets = [
+      [KEYS.AUTH_TOKEN, accessToken],
+      [KEYS.USER_DATA, JSON.stringify(userData)],
+    ];
+    if (refreshToken) {
+      sets.push([KEYS.REFRESH_TOKEN, refreshToken]);
+    }
+    await AsyncStorage.multiSet(sets);
+  };
+
   const login = async (email, password) => {
     try {
       const response = await api.post('/auth/login', { email, password });
-      const { accessToken, user: userData } = response.data;
+      const { accessToken, refreshToken, user: userData } = response.data;
 
-      // ✅ SUCCESS: Show splash screen for a smooth transition
-      setIsLoading(true);
-
-      await AsyncStorage.multiSet([
-        [CONFIG.STORAGE_KEYS.AUTH_TOKEN, accessToken],
-        [CONFIG.STORAGE_KEYS.USER_DATA, JSON.stringify(userData)],
-      ]);
-
+      // 🎯 SAVE TO STORAGE SO API CALLS WORK, BUT CHECK VERIFICATION FIRST
+      await persistSession(accessToken, refreshToken, userData);
       setToken(accessToken);
       setUser(userData);
-      setIsAuthenticated(true);
 
+      // 🎯 NEW: If user is not verified, return a special flag instead of logging them in fully
+      if (userData.isVerified === false) {
+        console.log('⚠️ User logged in but requires email verification');
+        return { success: true, requiresVerification: true, user: userData };
+      }
+
+      setIsLoading(true);
+      setIsAuthenticated(true); // Only mark as fully authenticated if verified
       await fetchUserProfile();
 
       return { success: true, user: userData };
     } catch (error) {
-      // ❌ FAILURE: Explicitly ensure loading is false so we stay on LoginScreen
       setIsLoading(false);
       return extractError(error, 'Login failed. Please try again.');
     } finally {
-      // Turn off loading after successful transition so the Main App renders
       setIsLoading(false);
     }
   };
@@ -140,10 +154,8 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     try {
       const response = await api.post('/auth/register', userData);
-      
-      // ✅ SUCCESS: Show splash briefly before going to Verify Email
       setIsLoading(true);
-      
+
       return {
         success: true,
         requiresVerification: true,
@@ -151,7 +163,6 @@ export const AuthProvider = ({ children }) => {
         user: response.data?.user,
       };
     } catch (error) {
-      // ❌ FAILURE: Stay on Register screen
       setIsLoading(false);
       return extractError(error, 'Registration failed. Please try again.');
     } finally {
@@ -162,18 +173,12 @@ export const AuthProvider = ({ children }) => {
   const verifyEmail = async (email, code) => {
     try {
       const response = await api.post('/auth/verify-email', { email, code });
-      
+
       if (response.data?.accessToken) {
-        const { accessToken, user: userData } = response.data;
-        
-        // ✅ SUCCESS: Show splash screen while logging them in
+        const { accessToken, refreshToken, user: userData } = response.data;
         setIsLoading(true);
 
-        await AsyncStorage.multiSet([
-          [CONFIG.STORAGE_KEYS.AUTH_TOKEN, accessToken],
-          [CONFIG.STORAGE_KEYS.USER_DATA, JSON.stringify(userData)],
-        ]);
-
+        await persistSession(accessToken, refreshToken, userData);
         setToken(accessToken);
         setUser(userData);
         setIsAuthenticated(true);
@@ -181,7 +186,6 @@ export const AuthProvider = ({ children }) => {
 
       return { success: true };
     } catch (error) {
-      // ❌ FAILURE: Stay on Verify screen
       setIsLoading(false);
       return extractError(error, 'Verification failed. Please try again.');
     } finally {
@@ -218,30 +222,31 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      // Show splash during logout transition
       setIsLoading(true);
       await api.post('/auth/logout').catch(() => {});
+
+      // 🎯 SAFE REMOVE: Uses the guaranteed string fallbacks
       await AsyncStorage.multiRemove([
-        CONFIG.STORAGE_KEYS.AUTH_TOKEN,
-        CONFIG.STORAGE_KEYS.USER_DATA,
+        KEYS.AUTH_TOKEN,
+        KEYS.REFRESH_TOKEN,
+        KEYS.USER_DATA,
       ]);
+
+      delete api.defaults.headers.common.Authorization;
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
       setUser(null);
       setToken(null);
       setIsAuthenticated(false);
-      setIsLoading(false); // Hide splash, show Auth screens
+      setIsLoading(false);
     }
   };
 
   const updateUser = async (updatedData) => {
     const updatedUser = { ...user, ...updatedData };
     setUser(updatedUser);
-    await AsyncStorage.setItem(
-      CONFIG.STORAGE_KEYS.USER_DATA,
-      JSON.stringify(updatedUser)
-    );
+    await AsyncStorage.setItem(KEYS.USER_DATA, JSON.stringify(updatedUser));
   };
 
   const value = {

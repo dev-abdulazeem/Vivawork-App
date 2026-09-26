@@ -5,13 +5,13 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  Alert,
   Animated,
   Easing,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '../utils/api';
-import Button from '../components/Button';
 
 import {
   Mail,
@@ -45,12 +45,35 @@ const VerifyEmailScreen = ({ route, navigation }) => {
   const successScale = useRef(new Animated.Value(0)).current;
   const successRotate = useRef(new Animated.Value(-0.5)).current; // Starts at -180 degrees
 
+  // Continuous spin animation for the resend icon
+  const spinValue = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     const timer = setInterval(() => {
       setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (isResending || countdown > 0) {
+      Animated.loop(
+        Animated.timing(spinValue, {
+          toValue: 1,
+          duration: 1000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      spinValue.setValue(0);
+    }
+  }, [isResending, countdown]);
+
+  const spin = spinValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   // 🎯 Fluid Animation Trigger
   const animateBox = (index) => {
@@ -147,7 +170,7 @@ const VerifyEmailScreen = ({ route, navigation }) => {
       ]).start(() => {
         // 3. Navigate after a brief pause to admire the animation
         setTimeout(() => {
-          navigation.navigate('Login'); // Or 'DocumentVerification' based on your flow
+          navigation.replace('Login'); // Use replace so they can't go back to this screen
         }, 1200);
       });
     });
@@ -163,6 +186,7 @@ const VerifyEmailScreen = ({ route, navigation }) => {
 
     setIsLoading(true);
     setError('');
+    Keyboard.dismiss(); // Hide keyboard on submit
     
     try {
       await api.post('/auth/verify-email', {
@@ -170,12 +194,10 @@ const VerifyEmailScreen = ({ route, navigation }) => {
         code: verificationCode,
       });
       
-      // Trigger the beautiful success animation instead of instant navigation
       triggerSuccessAnimation();
       
     } catch (err) {
       setError(err.response?.data?.message || 'Invalid verification code. Please try again.');
-      // Shake animation on error could go here, but clearing code is standard
       setCode(['', '', '', '', '', '']);
       inputRefs.current[0]?.focus();
     } finally {
@@ -188,9 +210,12 @@ const VerifyEmailScreen = ({ route, navigation }) => {
 
     setIsResending(true);
     try {
-      await api.post('/auth/resend-verification', { email });
+      // 🎯 FIX: Changed from '/auth/resend-verification' to '/auth/resend-code'
+      await api.post('/auth/resend-code', { email });
+      
       setCountdown(60);
       setCode(['', '', '', '', '', '']);
+      setError(''); // Clear any previous errors
       inputRefs.current[0]?.focus();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to resend code');
@@ -201,134 +226,142 @@ const VerifyEmailScreen = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.content}>
-        
-        {/* 🎯 SUCCESS OVERLAY (Animates in on success) */}
-        {isSuccess && (
-          <View style={styles.successOverlay}>
-            <Animated.View
-              style={[
-                styles.successIconContainer,
-                {
-                  transform: [
-                    { scale: successScale },
-                    { rotate: successRotate.interpolate({ inputRange: [-0.5, 0], outputRange: ['-180deg', '0deg'] }) },
-                  ],
-                },
-              ]}
-            >
-              <CheckCircle size={80} color="#059669" strokeWidth={2.5} />
-            </Animated.View>
-            <Animated.Text style={[styles.successText, { opacity: successScale }]}>
-              Email Verified!
-            </Animated.Text>
-          </View>
-        )}
-
-        {/* Header */}
-        <Animated.View style={[styles.header, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
-          <View style={styles.iconContainer}>
-            <Mail size={32} color="#059669" strokeWidth={2} />
-          </View>
-          <Text style={styles.title}>Verify Your Email</Text>
-          <Text style={styles.subtitle}>
-            Enter the 6-digit code sent to{'\n'}
-            <Text style={styles.email}>{email}</Text>
-          </Text>
-        </Animated.View>
-
-        {/* Error Banner */}
-        {error ? (
-          <Animated.View style={[styles.errorBanner, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
-            <AlertCircle size={18} color="#EF4444" />
-            <Text style={styles.errorText}>{error}</Text>
-          </Animated.View>
-        ) : null}
-
-        {/* Code Input */}
-        <Animated.View style={[styles.codeContainer, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
-          {code.map((digit, index) => (
-            <Animated.View
-              key={index}
-              style={[
-                styles.inputWrapper,
-                { transform: [{ scale: boxScales[index] }] },
-              ]}
-            >
-              <TextInput
-                ref={(ref) => (inputRefs.current[index] = ref)}
+      {/* 🎯 Tapping anywhere outside the inputs dismisses the keyboard */}
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.content}>
+          
+          {/* 🎯 SUCCESS OVERLAY (Animates in on success) */}
+          {isSuccess && (
+            <View style={styles.successOverlay}>
+              <Animated.View
                 style={[
-                  styles.codeInput,
-                  digit && styles.codeInputFilled,
-                  error && styles.codeInputError,
+                  styles.successIconContainer,
+                  {
+                    transform: [
+                      { scale: successScale },
+                      { rotate: successRotate.interpolate({ inputRange: [-0.5, 0], outputRange: ['-180deg', '0deg'] }) },
+                    ],
+                  },
                 ]}
-                value={digit}
-                onChangeText={(value) => handleCodeChange(value, index)}
-                onKeyPress={(e) => handleKeyPress(e, index)}
-                keyboardType="number-pad"
-                maxLength={1}
-                selectTextOnFocus
-                autoFocus={index === 0}
-                contextMenuHidden // Prevents paste menu from blocking UI
-              />
+              >
+                <CheckCircle size={88} color="#059669" strokeWidth={2.5} />
+              </Animated.View>
+              <Animated.Text style={[styles.successText, { opacity: successScale }]}>
+                Email Verified!
+              </Animated.Text>
+            </View>
+          )}
+
+          {/* Header */}
+          <Animated.View style={[styles.header, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+            <View style={styles.iconContainer}>
+              <Mail size={32} color="#059669" strokeWidth={2} />
+            </View>
+            <Text style={styles.title}>Verify Your Email</Text>
+            <Text style={styles.subtitle}>
+              Enter the 6-digit code sent to{'\n'}
+              <Text style={styles.email}>{email}</Text>
+            </Text>
+          </Animated.View>
+
+          {/* Error Banner */}
+          {error ? (
+            <Animated.View style={[styles.errorBanner, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+              <AlertCircle size={18} color="#EF4444" />
+              <Text style={styles.errorText}>{error}</Text>
             </Animated.View>
-          ))}
-        </Animated.View>
+          ) : null}
 
-        {/* Verify Button */}
-        <Animated.View style={[styles.buttonContainer, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
-          <TouchableOpacity
-            style={[
-              styles.verifyButton,
-              (isLoading || code.join('').length !== 6) && styles.verifyButtonDisabled,
-            ]}
-            onPress={handleVerify}
-            disabled={isLoading || code.join('').length !== 6}
-            activeOpacity={0.8}
-          >
-            {isLoading ? (
-              <View style={styles.spinner} />
-            ) : (
-              <>
-                <Text style={styles.verifyButtonText}>Verify Email</Text>
-                <ArrowRight size={20} color="#fff" />
-              </>
-            )}
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* Resend & Footer */}
-        <Animated.View style={[styles.footer, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
-          <View style={styles.resendContainer}>
-            <Text style={styles.resendText}>Didn't receive the code? </Text>
-            <TouchableOpacity
-              onPress={handleResend}
-              disabled={countdown > 0 || isResending}
-              activeOpacity={0.7}
-            >
-              <View style={styles.resendLinkWrapper}>
-                {countdown > 0 || isResending ? (
-                  <RotateCw size={14} color="#9CA3AF" style={styles.spinningIcon} />
-                ) : null}
-                <Text
+          {/* Code Input */}
+          <Animated.View style={[styles.codeContainer, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+            {code.map((digit, index) => (
+              <Animated.View
+                key={index}
+                style={[
+                  styles.inputWrapper,
+                  { transform: [{ scale: boxScales[index] }] },
+                ]}
+              >
+                <TextInput
+                  ref={(ref) => (inputRefs.current[index] = ref)}
                   style={[
-                    styles.resendLink,
-                    (countdown > 0 || isResending) && styles.resendLinkDisabled,
+                    styles.codeInput,
+                    digit && styles.codeInputFilled,
+                    error && styles.codeInputError,
                   ]}
-                >
-                  {countdown > 0 ? `Resend in ${countdown}s` : 'Resend Code'}
-                </Text>
-              </View>
+                  value={digit}
+                  onChangeText={(value) => handleCodeChange(value, index)}
+                  onKeyPress={(e) => handleKeyPress(e, index)}
+                  keyboardType="number-pad"
+                  returnKeyType="done"
+                  onSubmitEditing={Keyboard.dismiss} // Hides keyboard when "Done" is pressed
+                  maxLength={1}
+                  selectTextOnFocus
+                  autoFocus={index === 0}
+                  contextMenuHidden // Prevents paste menu from blocking UI
+                  blurOnSubmit={false}
+                />
+              </Animated.View>
+            ))}
+          </Animated.View>
+
+          {/* Verify Button */}
+          <Animated.View style={[styles.buttonContainer, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+            <TouchableOpacity
+              style={[
+                styles.verifyButton,
+                (isLoading || code.join('').length !== 6) && styles.verifyButtonDisabled,
+              ]}
+              onPress={handleVerify}
+              disabled={isLoading || code.join('').length !== 6}
+              activeOpacity={0.8}
+            >
+              {isLoading ? (
+                <Animated.View style={[styles.spinner, { transform: [{ rotate: spin }] }]} />
+              ) : (
+                <>
+                  <Text style={styles.verifyButtonText}>Verify Email</Text>
+                  <ArrowRight size={20} color="#fff" />
+                </>
+              )}
             </TouchableOpacity>
-          </View>
+          </Animated.View>
 
-          <View style={styles.expiryContainer}>
-            <ShieldCheck size={16} color="#9CA3AF" />
-            <Text style={styles.expiryText}>Your verification code expires in 10 minutes</Text>
-          </View>
-        </Animated.View>
+          {/* Resend & Footer */}
+          <Animated.View style={[styles.footer, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+            <View style={styles.resendContainer}>
+              <Text style={styles.resendText}>Didn't receive the code? </Text>
+              <TouchableOpacity
+                onPress={handleResend}
+                disabled={countdown > 0 || isResending}
+                activeOpacity={0.7}
+              >
+                <View style={styles.resendLinkWrapper}>
+                  {(countdown > 0 || isResending) && (
+                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                      <RotateCw size={14} color={countdown > 0 ? "#9CA3AF" : "#059669"} />
+                    </Animated.View>
+                  )}
+                  <Text
+                    style={[
+                      styles.resendLink,
+                      (countdown > 0 || isResending) && styles.resendLinkDisabled,
+                    ]}
+                  >
+                    {countdown > 0 ? `Resend in ${countdown}s` : 'Resend Code'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
 
-      </View>
+            <View style={styles.expiryContainer}>
+              <ShieldCheck size={16} color="#9CA3AF" />
+              <Text style={styles.expiryText}>Your verification code expires in 10 minutes</Text>
+            </View>
+          </Animated.View>
+
+        </View>
+      </TouchableWithoutFeedback>
     </SafeAreaView>
   );
 };
@@ -361,7 +394,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   successText: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '800',
     color: '#059669',
     letterSpacing: -0.5,
@@ -373,26 +406,26 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   iconContainer: {
-    width: 72,
-    height: 72,
+    width: 80,
+    height: 80,
     backgroundColor: '#ECFDF5', // Solid emerald-50, NO gradient
-    borderRadius: 20,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   title: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '800',
     color: '#111827',
     marginBottom: 8,
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 15,
+    fontSize: 16,
     color: '#6B7280',
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 24,
   },
   email: {
     color: '#059669',
@@ -423,7 +456,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     marginBottom: 32,
-    gap: 10,
+    gap: 12, 
   },
   inputWrapper: {
     // Wrapper needed for independent scale animations
@@ -438,7 +471,7 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '800',
     color: '#111827',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#FFFFFF',
   },
   codeInputFilled: {
     borderColor: '#059669',
@@ -489,8 +522,6 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: 'rgba(255,255,255,0.3)',
     borderTopColor: '#FFFFFF',
-    // Note: For a spinning animation, you'd add an Animated.Value, 
-    // but a static spinner is fine for the disabled state, or we can animate it.
   },
 
   // Footer
@@ -511,9 +542,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-  },
-  spinningIcon: {
-    // You can add a continuous rotation animation to this if desired
   },
   resendLink: {
     fontSize: 15,

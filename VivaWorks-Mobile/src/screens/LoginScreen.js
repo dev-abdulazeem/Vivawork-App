@@ -73,7 +73,7 @@ const LoginScreen = ({ navigation }) => {
 
     if (emailError || passwordError) {
       setErrors({ email: emailError, password: passwordError });
-      return; // Stop execution
+      return;
     }
 
     setIsLoading(true);
@@ -81,18 +81,29 @@ const LoginScreen = ({ navigation }) => {
 
     try {
       const result = await login(email, password);
+      console.log('🔍 LOGIN RESULT:', result);
       
+      // 🎯 NEW: Catch the requiresVerification flag from AuthContext
+      if (result?.success === true && result?.requiresVerification === true) {
+        console.log('✅ Redirecting to VerifyEmail because isVerified is false');
+        navigation.navigate('VerifyEmail', { email: email });
+        return; // Stop execution, don't proceed to main app
+      }
+
       // 2. Robust Error Handling: Explicitly check for failure
       if (!result || result.success === false) {
         const errorCode = result?.code;
         const errorMessage = result?.error || 'Login failed. Please check your credentials.';
+
+        console.log('⚠️ ERROR CODE:', errorCode);
+        console.log('⚠️ ERROR MESSAGE:', errorMessage);
 
         switch (errorCode) {
           case 'INVALID_CREDENTIALS':
           case 'USER_NOT_FOUND':
             setErrors({ 
               general: 'Incorrect email or password. Please try again.',
-              password: ' ' // Keeps the password field highlighted as invalid
+              password: ' ' 
             });
             break;
           case 'ACCOUNT_LOCKED':
@@ -101,25 +112,29 @@ const LoginScreen = ({ navigation }) => {
           case 'ACCOUNT_SUSPENDED':
             setErrors({ general: 'Your account has been suspended. Please contact support.' });
             break;
+            
           case 'EMAIL_NOT_VERIFIED':
-            setErrors({ 
-              general: 'Please verify your email before logging in.',
-              email: 'Email not verified'
-            });
+          case 'UNVERIFIED_EMAIL':
+          case 'NOT_VERIFIED':
+          case 'UNVERIFIED_ACCOUNT':
+            console.log('✅ Redirecting to VerifyEmail via error code');
+            navigation.navigate('VerifyEmail', { email: email });
             break;
+            
           default:
-            setErrors({ general: errorMessage });
+            if (errorMessage.toLowerCase().includes('verify') || errorMessage.toLowerCase().includes('unverified')) {
+              console.log('✅ Fallback redirect to VerifyEmail triggered by message');
+              navigation.navigate('VerifyEmail', { email: email });
+            } else {
+              setErrors({ general: errorMessage });
+            }
         }
         
-        // CRITICAL: Return here to prevent any further execution or accidental navigation
         return; 
       }
       
-      // 3. If successful, AuthContext should handle navigation automatically.
-      // We do nothing here to let AuthContext do its job.
-      
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('❌ Login error:', error);
       setErrors({ 
         general: error.response?.data?.message || 'Network error. Please check your connection and try again.' 
       });
