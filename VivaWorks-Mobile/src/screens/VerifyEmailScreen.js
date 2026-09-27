@@ -1,5 +1,3 @@
-// src/screens/VerifyEmailScreen.js
-
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -8,37 +6,81 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SIZES, FONTS } from '../constants/theme';
 import api from '../utils/api';
 import Button from '../components/Button';
-import Loading from '../components/Loading';
+
+import {
+  Mail,
+  ShieldCheck,
+  ArrowRight,
+  RotateCw,
+  CheckCircle,
+  AlertCircle,
+} from 'lucide-react-native';
 
 const VerifyEmailScreen = ({ route, navigation }) => {
-  const { email } = route.params || {};
+  const email = route.params?.email || 'your email';
+  
+  // State
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [countdown, setCountdown] = useState(60);
+  const [error, setError] = useState('');
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  // Refs
   const inputRefs = useRef([]);
+  
+  // Animated Values for Fluid Input Effects
+  const boxScales = useRef([...Array(6)].map(() => new Animated.Value(1))).current;
+  
+  // Animated Values for Success Animation
+  const boxesOpacity = useRef(new Animated.Value(1)).current;
+  const boxesScale = useRef(new Animated.Value(1)).current;
+  const successScale = useRef(new Animated.Value(0)).current;
+  const successRotate = useRef(new Animated.Value(-0.5)).current; // Starts at -180 degrees
 
   useEffect(() => {
     const timer = setInterval(() => {
       setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
-
     return () => clearInterval(timer);
   }, []);
 
+  // 🎯 Fluid Animation Trigger
+  const animateBox = (index) => {
+    Animated.sequence([
+      Animated.spring(boxScales[index], {
+        toValue: 1.08,
+        friction: 4,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+      Animated.spring(boxScales[index], {
+        toValue: 1,
+        friction: 4,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
   const handleCodeChange = (value, index) => {
+    setError('');
+    
+    // Handle paste (e.g., "123456")
     if (value.length > 1) {
-      // Handle paste
-      const pastedCode = value.slice(0, 6).split('');
+      const pastedCode = value.replace(/\D/g, '').slice(0, 6).split('');
       const newCode = [...code];
       pastedCode.forEach((char, i) => {
         if (index + i < 6) {
           newCode[index + i] = char;
+          animateBox(index + i);
         }
       });
       setCode(newCode);
@@ -47,59 +89,102 @@ const VerifyEmailScreen = ({ route, navigation }) => {
       return;
     }
 
+    // Handle single digit
+    if (!/^\d*$/.test(value)) return; // Only numbers
+
     const newCode = [...code];
     newCode[index] = value;
     setCode(newCode);
 
-    // Auto-advance to next input
-    if (value && index < 5) {
-      inputRefs.current[index + 1]?.focus();
+    if (value) {
+      animateBox(index);
+      if (index < 5) {
+        inputRefs.current[index + 1]?.focus();
+      }
     }
   };
 
   const handleKeyPress = (e, index) => {
     if (e.nativeEvent.key === 'Backspace' && !code[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
+      const newCode = [...code];
+      newCode[index - 1] = '';
+      setCode(newCode);
     }
+  };
+
+  // 🎯 Epic Success Animation
+  const triggerSuccessAnimation = () => {
+    setIsSuccess(true);
+    
+    // 1. Fade and shrink the boxes
+    Animated.parallel([
+      Animated.timing(boxesOpacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.spring(boxesScale, {
+        toValue: 0.5,
+        friction: 5,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      // 2. Pop and rotate the success checkmark
+      Animated.parallel([
+        Animated.spring(successScale, {
+          toValue: 1,
+          friction: 5,
+          tension: 40,
+          useNativeDriver: true,
+        }),
+        Animated.spring(successRotate, {
+          toValue: 0, // Rotates from -0.5 (-180deg) to 0
+          friction: 6,
+          tension: 40,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        // 3. Navigate after a brief pause to admire the animation
+        setTimeout(() => {
+          navigation.navigate('Login'); // Or 'DocumentVerification' based on your flow
+        }, 1200);
+      });
+    });
   };
 
   const handleVerify = async () => {
     const verificationCode = code.join('');
 
     if (verificationCode.length !== 6) {
-      Alert.alert('Error', 'Please enter the complete 6-digit code');
+      setError('Please enter the complete 6-digit code');
       return;
     }
 
     setIsLoading(true);
+    setError('');
+    
     try {
       await api.post('/auth/verify-email', {
         email,
         code: verificationCode,
       });
-
-      Alert.alert(
-        'Success',
-        'Your email has been verified successfully!',
-        [
-          {
-            text: 'Continue',
-            onPress: () => navigation.navigate('Login'),
-          },
-        ]
-      );
-    } catch (error) {
-      Alert.alert(
-        'Verification Failed',
-        error.friendlyMessage || 'Invalid verification code'
-      );
+      
+      // Trigger the beautiful success animation instead of instant navigation
+      triggerSuccessAnimation();
+      
+    } catch (err) {
+      setError(err.response?.data?.message || 'Invalid verification code. Please try again.');
+      // Shake animation on error could go here, but clearing code is standard
+      setCode(['', '', '', '', '', '']);
+      inputRefs.current[0]?.focus();
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleResend = async () => {
-    if (countdown > 0) return;
+    if (countdown > 0 || isResending) return;
 
     setIsResending(true);
     try {
@@ -107,99 +192,142 @@ const VerifyEmailScreen = ({ route, navigation }) => {
       setCountdown(60);
       setCode(['', '', '', '', '', '']);
       inputRefs.current[0]?.focus();
-      Alert.alert('Sent', 'Verification code has been resent to your email');
-    } catch (error) {
-      Alert.alert('Error', error.friendlyMessage || 'Failed to resend code');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to resend code');
     } finally {
       setIsResending(false);
     }
   };
 
-  const handleSkip = () => {
-    Alert.alert(
-      'Skip Verification',
-      'You can verify your email later from settings. Some features may be limited.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Skip',
-          style: 'destructive',
-          onPress: () => navigation.navigate('Login'),
-        },
-      ]
-    );
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.content}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.iconContainer}>
-            <Text style={styles.icon}>📧</Text>
-          </View>
-          <Text style={styles.title}>Check Your Email</Text>
-          <Text style={styles.subtitle}>
-            We've sent a verification code to{'\n'}
-            <Text style={styles.email}>{email || 'your email'}</Text>
-          </Text>
-        </View>
-
-        {/* Code Input */}
-        <View style={styles.codeContainer}>
-          {code.map((digit, index) => (
-            <TextInput
-              key={index}
-              ref={(ref) => (inputRefs.current[index] = ref)}
+        
+        {/* 🎯 SUCCESS OVERLAY (Animates in on success) */}
+        {isSuccess && (
+          <View style={styles.successOverlay}>
+            <Animated.View
               style={[
-                styles.codeInput,
-                digit && styles.codeInputFilled,
-                index === 0 && styles.codeInputFirst,
-                index === 5 && styles.codeInputLast,
-              ]}
-              value={digit}
-              onChangeText={(value) => handleCodeChange(value, index)}
-              onKeyPress={(e) => handleKeyPress(e, index)}
-              keyboardType="number-pad"
-              maxLength={6}
-              selectTextOnFocus
-              autoFocus={index === 0}
-            />
-          ))}
-        </View>
-
-        {/* Verify Button */}
-        <Button
-          title="Verify Email"
-          onPress={handleVerify}
-          loading={isLoading}
-          disabled={isLoading || code.join('').length !== 6}
-          variant="primary"
-          size="large"
-        />
-
-        {/* Resend */}
-        <View style={styles.resendContainer}>
-          <Text style={styles.resendText}>Didn't receive the code? </Text>
-          <TouchableOpacity
-            onPress={handleResend}
-            disabled={countdown > 0 || isResending}
-          >
-            <Text
-              style={[
-                styles.resendLink,
-                (countdown > 0 || isResending) && styles.resendLinkDisabled,
+                styles.successIconContainer,
+                {
+                  transform: [
+                    { scale: successScale },
+                    { rotate: successRotate.interpolate({ inputRange: [-0.5, 0], outputRange: ['-180deg', '0deg'] }) },
+                  ],
+                },
               ]}
             >
-              {countdown > 0 ? `Resend in ${countdown}s` : 'Resend'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+              <CheckCircle size={80} color="#059669" strokeWidth={2.5} />
+            </Animated.View>
+            <Animated.Text style={[styles.successText, { opacity: successScale }]}>
+              Email Verified!
+            </Animated.Text>
+          </View>
+        )}
 
-        {/* Skip */}
-        <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
-          <Text style={styles.skipText}>Skip for now</Text>
-        </TouchableOpacity>
+        {/* Header */}
+        <Animated.View style={[styles.header, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+          <View style={styles.iconContainer}>
+            <Mail size={32} color="#059669" strokeWidth={2} />
+          </View>
+          <Text style={styles.title}>Verify Your Email</Text>
+          <Text style={styles.subtitle}>
+            Enter the 6-digit code sent to{'\n'}
+            <Text style={styles.email}>{email}</Text>
+          </Text>
+        </Animated.View>
+
+        {/* Error Banner */}
+        {error ? (
+          <Animated.View style={[styles.errorBanner, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+            <AlertCircle size={18} color="#EF4444" />
+            <Text style={styles.errorText}>{error}</Text>
+          </Animated.View>
+        ) : null}
+
+        {/* Code Input */}
+        <Animated.View style={[styles.codeContainer, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+          {code.map((digit, index) => (
+            <Animated.View
+              key={index}
+              style={[
+                styles.inputWrapper,
+                { transform: [{ scale: boxScales[index] }] },
+              ]}
+            >
+              <TextInput
+                ref={(ref) => (inputRefs.current[index] = ref)}
+                style={[
+                  styles.codeInput,
+                  digit && styles.codeInputFilled,
+                  error && styles.codeInputError,
+                ]}
+                value={digit}
+                onChangeText={(value) => handleCodeChange(value, index)}
+                onKeyPress={(e) => handleKeyPress(e, index)}
+                keyboardType="number-pad"
+                maxLength={1}
+                selectTextOnFocus
+                autoFocus={index === 0}
+                contextMenuHidden // Prevents paste menu from blocking UI
+              />
+            </Animated.View>
+          ))}
+        </Animated.View>
+
+        {/* Verify Button */}
+        <Animated.View style={[styles.buttonContainer, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+          <TouchableOpacity
+            style={[
+              styles.verifyButton,
+              (isLoading || code.join('').length !== 6) && styles.verifyButtonDisabled,
+            ]}
+            onPress={handleVerify}
+            disabled={isLoading || code.join('').length !== 6}
+            activeOpacity={0.8}
+          >
+            {isLoading ? (
+              <View style={styles.spinner} />
+            ) : (
+              <>
+                <Text style={styles.verifyButtonText}>Verify Email</Text>
+                <ArrowRight size={20} color="#fff" />
+              </>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
+
+        {/* Resend & Footer */}
+        <Animated.View style={[styles.footer, { opacity: boxesOpacity, transform: [{ scale: boxesScale }] }]}>
+          <View style={styles.resendContainer}>
+            <Text style={styles.resendText}>Didn't receive the code? </Text>
+            <TouchableOpacity
+              onPress={handleResend}
+              disabled={countdown > 0 || isResending}
+              activeOpacity={0.7}
+            >
+              <View style={styles.resendLinkWrapper}>
+                {countdown > 0 || isResending ? (
+                  <RotateCw size={14} color="#9CA3AF" style={styles.spinningIcon} />
+                ) : null}
+                <Text
+                  style={[
+                    styles.resendLink,
+                    (countdown > 0 || isResending) && styles.resendLinkDisabled,
+                  ]}
+                >
+                  {countdown > 0 ? `Resend in ${countdown}s` : 'Resend Code'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.expiryContainer}>
+            <ShieldCheck size={16} color="#9CA3AF" />
+            <Text style={styles.expiryText}>Your verification code expires in 10 minutes</Text>
+          </View>
+        </Animated.View>
+
       </View>
     </SafeAreaView>
   );
@@ -208,98 +336,207 @@ const VerifyEmailScreen = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: '#F9FAFB', // Clean gray-50
   },
   content: {
     flex: 1,
-    paddingHorizontal: SIZES.lg,
-    paddingTop: SIZES.xl,
+    paddingHorizontal: 24,
+    paddingTop: 40,
+    justifyContent: 'center',
   },
-  header: {
-    alignItems: 'center',
-    marginBottom: SIZES.xl,
-  },
-  iconContainer: {
-    width: 100,
-    height: 100,
-    backgroundColor: COLORS.primaryLight,
-    borderRadius: 50,
+  
+  // Success Overlay
+  successOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: SIZES.lg,
+    zIndex: 100,
   },
-  icon: {
-    fontSize: 48,
+  successIconContainer: {
+    marginBottom: 16,
+  },
+  successText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#059669',
+    letterSpacing: -0.5,
+  },
+
+  // Header
+  header: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  iconContainer: {
+    width: 72,
+    height: 72,
+    backgroundColor: '#ECFDF5', // Solid emerald-50, NO gradient
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   title: {
-    ...FONTS.h3,
-    color: COLORS.textPrimary,
-    marginBottom: SIZES.sm,
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 8,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    ...FONTS.body1,
-    color: COLORS.textSecondary,
+    fontSize: 15,
+    color: '#6B7280',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 22,
   },
   email: {
-    color: COLORS.primary,
-    fontWeight: '600',
+    color: '#059669',
+    fontWeight: '700',
   },
+
+  // Error Banner
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 24,
+    gap: 10,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#B91C1C',
+    fontWeight: '500',
+  },
+
+  // Code Input
   codeContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginBottom: SIZES.xl,
-    gap: SIZES.sm,
+    marginBottom: 32,
+    gap: 10,
+  },
+  inputWrapper: {
+    // Wrapper needed for independent scale animations
   },
   codeInput: {
-    width: 48,
-    height: 56,
+    width: 52,
+    height: 64,
     borderWidth: 2,
-    borderColor: COLORS.border,
-    borderRadius: SIZES.radiusMd,
+    borderColor: '#E5E7EB',
+    borderRadius: 14,
     textAlign: 'center',
-    fontSize: 24,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    backgroundColor: COLORS.gray50,
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#111827',
+    backgroundColor: '#F9FAFB',
   },
   codeInputFilled: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.white,
+    borderColor: '#059669',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  codeInputFirst: {
-    marginLeft: 0,
+  codeInputError: {
+    borderColor: '#EF4444',
+    backgroundColor: '#FEF2F2',
   },
-  codeInputLast: {
-    marginRight: 0,
+
+  // Button
+  buttonContainer: {
+    marginBottom: 32,
+  },
+  verifyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#059669',
+    paddingVertical: 18,
+    borderRadius: 14,
+    gap: 10,
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  verifyButtonDisabled: {
+    backgroundColor: '#D1D5DB',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  verifyButtonText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  spinner: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.3)',
+    borderTopColor: '#FFFFFF',
+    // Note: For a spinning animation, you'd add an Animated.Value, 
+    // but a static spinner is fine for the disabled state, or we can animate it.
+  },
+
+  // Footer
+  footer: {
+    alignItems: 'center',
   },
   resendContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: SIZES.lg,
+    marginBottom: 24,
   },
   resendText: {
-    ...FONTS.body1,
-    color: COLORS.textSecondary,
+    fontSize: 15,
+    color: '#6B7280',
+  },
+  resendLinkWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  spinningIcon: {
+    // You can add a continuous rotation animation to this if desired
   },
   resendLink: {
-    ...FONTS.body1,
-    color: COLORS.primary,
-    fontWeight: '600',
+    fontSize: 15,
+    color: '#059669',
+    fontWeight: '700',
   },
   resendLinkDisabled: {
-    color: COLORS.textTertiary,
+    color: '#9CA3AF',
   },
-  skipButton: {
+  expiryContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SIZES.xl,
-    padding: SIZES.md,
+    gap: 8,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    width: '100%',
+    justifyContent: 'center',
   },
-  skipText: {
-    ...FONTS.body1,
-    color: COLORS.textTertiary,
+  expiryText: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    fontWeight: '500',
   },
 });
 
