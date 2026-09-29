@@ -14,10 +14,11 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import Header from '../components/Header';
 
-// Lucide React Native Icons
+// 🎯 FIXED: Using standard, universally supported lucide-react-native icon names
 import {
   Briefcase,
   Flame,
@@ -30,7 +31,8 @@ import {
   SlidersHorizontal,
   RefreshCw,
   Plus,
-  ChevronRight, // Added for the Contracts button
+  Star,
+  Rocket, // Changed from RocketLaunch to ensure compatibility
 } from 'lucide-react-native';
 
 // ────────────────────────────────────────────────────────────────
@@ -140,7 +142,7 @@ const SkeletonCard = () => (
 // ────────────────────────────────────────────────────────────────
 // JOB CARD
 // ────────────────────────────────────────────────────────────────
-const JobItemCard = ({ job, isSaved, onToggleSave, onPress }) => {
+const JobItemCard = ({ job, isSaved, onToggleSave, onPress, isRecommended, matchScore, matchReasons }) => {
   const statusKey = job.status || 'open';
   const statusStyle = STATUS_STYLES[statusKey] || STATUS_STYLES.open;
   const proposalsCount = job.proposals?.length || 0;
@@ -161,6 +163,12 @@ const JobItemCard = ({ job, isSaved, onToggleSave, onPress }) => {
         <View style={{ flex: 1 }}>
           {/* Tags row */}
           <View style={styles.tagsRow}>
+            {isRecommended && typeof matchScore === 'number' && (
+              <View style={styles.matchBadge}>
+                <Rocket size={12} color={C.white} />
+                <Text style={styles.matchBadgeText}>{Math.round(matchScore * 100)}% Match</Text>
+              </View>
+            )}
             <View style={styles.badgeOutline}>
               <Text style={styles.badgeOutlineText}>
                 {(job.budgetType || 'fixed').toUpperCase()}
@@ -184,6 +192,13 @@ const JobItemCard = ({ job, isSaved, onToggleSave, onPress }) => {
           <Text style={styles.title} numberOfLines={2}>
             {job.title}
           </Text>
+          
+          {isRecommended && matchReasons?.length > 0 && (
+            <Text style={styles.matchReasons} numberOfLines={1}>
+              {matchReasons.join(' • ')}
+            </Text>
+          )}
+
           <Text style={styles.description} numberOfLines={2}>
             {job.description}
           </Text>
@@ -251,7 +266,7 @@ const JobItemCard = ({ job, isSaved, onToggleSave, onPress }) => {
               <Bookmark 
                 size={20} 
                 color={isSaved ? C.emerald600 : C.slate400} 
-                fill={isSaved ? C.emerald600 : 'none'} 
+                fill={isSaved ? C.emerald600 : 'transparent'} 
               />
             </TouchableOpacity>
 
@@ -269,6 +284,8 @@ const JobItemCard = ({ job, isSaved, onToggleSave, onPress }) => {
 // MAIN SCREEN
 // ────────────────────────────────────────────────────────────────
 const JobsScreen = ({ navigation }) => {
+  const { user } = useAuth();
+
   const [jobs, setJobs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
@@ -278,6 +295,12 @@ const JobsScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [savedJobs, setSavedJobs] = useState(new Set());
   const [filtersVisible, setFiltersVisible] = useState(false);
+
+  // ML Recommendations State
+  const [activeTab, setActiveTab] = useState('all');
+  const [recommendedJobs, setRecommendedJobs] = useState([]);
+  const [recLoading, setRecLoading] = useState(false);
+  const [canRecommend, setCanRecommend] = useState(false);
 
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -348,20 +371,50 @@ const JobsScreen = ({ navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
+  const fetchRecommended = useCallback(async () => {
+    setRecLoading(true);
+    try {
+      const response = await api.get('/users/recommendations?limit=20');
+      const recs = response.data?.recommendations || [];
+      setRecommendedJobs(recs);
+      setCanRecommend(recs.length > 0);
+      return recs.length > 0;
+    } catch (err) {
+      setRecommendedJobs([]);
+      setCanRecommend(false);
+      return false;
+    } finally {
+      setRecLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRecommended().then((ok) => {
+      if (ok) setActiveTab('recommended');
+    });
+  }, [fetchRecommended]);
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchJobs(1);
-  }, [fetchJobs]);
+    if (activeTab === 'recommended' && canRecommend) {
+      fetchRecommended();
+    } else {
+      fetchJobs(1);
+    }
+  }, [activeTab, canRecommend, fetchJobs, fetchRecommended]);
 
   const onLoadMore = () => {
-    if (isFetchingMore || page >= totalPages) return;
+    if (activeTab === 'recommended' || isFetchingMore || page >= totalPages) return;
     fetchJobs(page + 1, { append: true });
   };
 
+  const displayJobs = activeTab === 'recommended' && canRecommend ? recommendedJobs : jobs;
+  const busy = activeTab === 'recommended' && canRecommend ? recLoading : isLoading;
+
   const filteredJobs = useMemo(() => {
-    if (!searchQuery) return jobs;
+    if (!searchQuery) return displayJobs;
     const q = searchQuery.toLowerCase();
-    return jobs.filter(
+    return displayJobs.filter(
       (job) =>
         job.title?.toLowerCase().includes(q) ||
         job.description?.toLowerCase().includes(q) ||
@@ -369,7 +422,7 @@ const JobsScreen = ({ navigation }) => {
         job.buyer?.firstName?.toLowerCase().includes(q) ||
         job.buyer?.lastName?.toLowerCase().includes(q)
     );
-  }, [jobs, searchQuery]);
+  }, [displayJobs, searchQuery]);
 
   const toggleSaveJob = (jobId) => {
     setSavedJobs((prev) => {
@@ -500,7 +553,7 @@ const JobsScreen = ({ navigation }) => {
 
   // ── Empty state ────────────────────────────────────────────────
   const renderEmpty = () => {
-    if (isLoading) return null;
+    if (isLoading || recLoading) return null;
     return (
       <View style={styles.emptyState}>
         <View style={styles.emptyIconCircle}>
@@ -540,6 +593,9 @@ const JobsScreen = ({ navigation }) => {
             isSaved={savedJobs.has(item._id || item.id)}
             onToggleSave={() => toggleSaveJob(item._id || item.id)}
             onPress={() => navigation.navigate('JobDetail', { jobId: item._id || item.id })}
+            isRecommended={activeTab === 'recommended' && canRecommend}
+            matchScore={item.match_score}
+            matchReasons={item.match_reasons}
           />
         )}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.emerald600} />}
@@ -551,28 +607,17 @@ const JobsScreen = ({ navigation }) => {
           <View>
             {/* Hero / heading */}
             <View style={styles.heroSection}>
-              {/* NEW: Top row with Contracts button */}
-              <View style={styles.heroTopRow}>
-                <View style={styles.heroBadgeRow}>
-                  <View style={styles.heroBadgeIcon}>
-                    <Briefcase size={14} color={C.emerald600} />
-                  </View>
-                  <Text style={styles.heroEyebrow}>JOB BOARD</Text>
+              <View style={styles.heroBadgeRow}>
+                <View style={styles.heroBadgeIcon}>
+                  <Briefcase size={14} color={C.emerald600} />
                 </View>
-                <TouchableOpacity 
-                  style={styles.contractsBtn}
-                  onPress={() => navigation.navigate('Contracts')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.contractsBtnText}>My Contracts</Text>
-                  <ChevronRight size={16} color={C.emerald700} />
-                </TouchableOpacity>
+                <Text style={styles.heroEyebrow}>JOB BOARD</Text>
               </View>
 
               <Text style={styles.heroTitle}>Find Your Next Project</Text>
               <View style={styles.heroRow}>
                 <Text style={styles.heroSubtitle}>
-                  {isLoading ? 'Loading opportunities…' : `${total.toLocaleString()} jobs waiting for you`}
+                  {busy ? 'Loading opportunities…' : `${total.toLocaleString()} jobs waiting for you`}
                 </Text>
                 <View style={styles.activePill}>
                   <Flame size={14} color={C.emerald700} fill={C.emerald700} />
@@ -580,6 +625,27 @@ const JobsScreen = ({ navigation }) => {
                 </View>
               </View>
             </View>
+
+            {/* Tabs (only shown when the user has ML recommendations) */}
+            {canRecommend && (
+              <View style={styles.tabsRow}>
+                <TouchableOpacity
+                  style={[styles.tabBtn, activeTab === 'recommended' && styles.tabBtnActive]}
+                  onPress={() => setActiveTab('recommended')}
+                  activeOpacity={0.7}
+                >
+                  <Star size={16} color={activeTab === 'recommended' ? C.white : C.slate600} fill={activeTab === 'recommended' ? C.white : 'transparent'} />
+                  <Text style={[styles.tabBtnText, activeTab === 'recommended' && styles.tabBtnTextActive]}>For You</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tabBtn, activeTab === 'all' && styles.tabBtnActive]}
+                  onPress={() => setActiveTab('all')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.tabBtnText, activeTab === 'all' && styles.tabBtnTextActive]}>All Jobs</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Search + filter row */}
             <View style={styles.searchCard}>
@@ -617,12 +683,12 @@ const JobsScreen = ({ navigation }) => {
                 </TouchableOpacity>
 
                 <TouchableOpacity 
-                  onPress={() => fetchJobs(1)} 
+                  onPress={() => activeTab === 'recommended' && canRecommend ? fetchRecommended() : fetchJobs(1)} 
                   style={styles.refreshBtn} 
-                  disabled={isLoading}
+                  disabled={busy}
                   activeOpacity={0.7}
                 >
-                  {isLoading ? (
+                  {busy ? (
                     <ActivityIndicator size="small" color={C.emerald600} />
                   ) : (
                     <RefreshCw size={18} color={C.emerald600} />
@@ -632,7 +698,7 @@ const JobsScreen = ({ navigation }) => {
             </View>
 
             {/* Error banner */}
-            {!!error && (
+            {!!error && !canRecommend && (
               <View style={styles.errorBanner}>
                 <Text style={styles.errorText} numberOfLines={2}>
                   {error}
@@ -644,7 +710,7 @@ const JobsScreen = ({ navigation }) => {
             )}
 
             {/* Results count */}
-            {!isLoading && (
+            {!busy && (
               <Text style={styles.resultsCount}>
                 Showing <Text style={styles.resultsCountBold}>{filteredJobs.length}</Text> of{' '}
                 <Text style={styles.resultsCountBold}>{total}</Text> jobs
@@ -652,7 +718,7 @@ const JobsScreen = ({ navigation }) => {
               </Text>
             )}
 
-            {isLoading && (
+            {busy && activeTab === 'all' && (
               <View>
                 <SkeletonCard />
                 <SkeletonCard />
@@ -671,14 +737,16 @@ const JobsScreen = ({ navigation }) => {
         ListEmptyComponent={renderEmpty}
       />
 
-      {/* Floating Action Button */}
-      <TouchableOpacity
-        style={styles.fab}
-        activeOpacity={0.85}
-        onPress={() => navigation.navigate('PostJob')}
-      >
-        <Plus size={28} color={C.white} strokeWidth={2.5} />
-      </TouchableOpacity>
+      {/* 🎯 Floating Action Button: ONLY appears for buyers */}
+      {user?.isBuyer && (
+        <TouchableOpacity
+          style={styles.fab}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('PostJob')}
+        >
+          <Plus size={28} color={C.white} strokeWidth={2.5} />
+        </TouchableOpacity>
+      )}
 
       {renderFiltersModal()}
     </SafeAreaView>
@@ -694,14 +762,7 @@ const styles = StyleSheet.create({
 
   // Hero
   heroSection: { paddingTop: 16, paddingBottom: 12 },
-  heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }, // NEW
-  contractsBtn: { // NEW
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: C.white, borderWidth: 1, borderColor: C.emerald200,
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
-  },
-  contractsBtnText: { fontSize: 13, fontWeight: '700', color: C.emerald700 }, // NEW
-  heroBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  heroBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   heroBadgeIcon: {
     width: 28, height: 28, borderRadius: 8, backgroundColor: C.emerald50,
     alignItems: 'center', justifyContent: 'center',
@@ -716,6 +777,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20,
   },
   activePillText: { fontSize: 12, fontWeight: '700', color: C.emerald700 },
+
+  // Tabs
+  tabsRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  tabBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12,
+    backgroundColor: C.white, borderWidth: 1, borderColor: C.slate200,
+  },
+  tabBtnActive: { backgroundColor: C.emerald600, borderColor: C.emerald600 },
+  tabBtnText: { fontSize: 14, fontWeight: '700', color: C.slate600 },
+  tabBtnTextActive: { color: C.white },
 
   // Search card
   searchCard: {
@@ -788,6 +860,11 @@ const styles = StyleSheet.create({
   skeletonBlock: { backgroundColor: C.slate200, borderRadius: 6 },
 
   tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+  matchBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: C.emerald600, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6,
+  },
+  matchBadgeText: { fontSize: 10, fontWeight: '800', color: C.white },
   badgeOutline: {
     borderWidth: 1, borderColor: C.emerald100, backgroundColor: C.emerald50,
     paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6,
@@ -796,6 +873,7 @@ const styles = StyleSheet.create({
   popularBadgeContent: { flexDirection: 'row', alignItems: 'center', gap: 4 },
 
   title: { fontSize: 16, fontWeight: '800', color: C.slate900, marginBottom: 4, lineHeight: 22 },
+  matchReasons: { fontSize: 12, color: C.emerald700, fontWeight: '600', marginBottom: 6 },
   description: { fontSize: 14, color: C.slate500, lineHeight: 20, marginBottom: 10 },
 
   skillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
