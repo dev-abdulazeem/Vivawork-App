@@ -1,5 +1,4 @@
 // src/utils/api.js
-
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CONFIG from '../constants/config';
@@ -19,7 +18,11 @@ const api = axios.create({
 api.interceptors.request.use(
   async (config) => {
     try {
-      const token = await AsyncStorage.getItem(CONFIG.STORAGE_KEYS.AUTH_TOKEN);
+      // FIX: Safe fallback to prevent undefined key errors
+      const storageKeys = CONFIG?.STORAGE_KEYS || {};
+      const tokenKey = storageKeys.AUTH_TOKEN || '@vivaworks_auth_token';
+      
+      const token = await AsyncStorage.getItem(tokenKey);
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -96,10 +99,12 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const refreshToken = await AsyncStorage.getItem(
-          CONFIG.STORAGE_KEYS.REFRESH_TOKEN
-        );
+        // FIX: Safe fallback for refresh token key
+        const storageKeys = CONFIG?.STORAGE_KEYS || {};
+        const refreshTokenKey = storageKeys.REFRESH_TOKEN || '@vivaworks_refresh_token';
+        const authTokenKey = storageKeys.AUTH_TOKEN || '@vivaworks_auth_token';
 
+        const refreshToken = await AsyncStorage.getItem(refreshTokenKey);
         if (!refreshToken) {
           throw new Error('No refresh token stored');
         }
@@ -110,14 +115,14 @@ api.interceptors.response.use(
         });
 
         const { accessToken } = data;
+        const storageSets = [[authTokenKey, accessToken]];
 
-        const storageSets = [[CONFIG.STORAGE_KEYS.AUTH_TOKEN, accessToken]];
         // Save rotated refresh token if the backend issues a new one
         if (data.refreshToken) {
-          storageSets.push([CONFIG.STORAGE_KEYS.REFRESH_TOKEN, data.refreshToken]);
+          storageSets.push([refreshTokenKey, data.refreshToken]);
         }
-        await AsyncStorage.multiSet(storageSets);
 
+        await AsyncStorage.multiSet(storageSets);
         api.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
         processQueue(null, accessToken);
 
@@ -126,13 +131,13 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
-
-        // Refresh token is also dead -> wipe the session.
-        // AuthContext will detect this and route to the login screen.
+        
+        // FIX: Safe fallback for multiRemove
+        const storageKeys = CONFIG?.STORAGE_KEYS || {};
         await AsyncStorage.multiRemove([
-          CONFIG.STORAGE_KEYS.AUTH_TOKEN,
-          CONFIG.STORAGE_KEYS.REFRESH_TOKEN,
-          CONFIG.STORAGE_KEYS.USER_DATA,
+          storageKeys.AUTH_TOKEN || '@vivaworks_auth_token',
+          storageKeys.REFRESH_TOKEN || '@vivaworks_refresh_token',
+          storageKeys.USER_DATA || '@vivaworks_user_data',
         ]);
 
         return Promise.reject({

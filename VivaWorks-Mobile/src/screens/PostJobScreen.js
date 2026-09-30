@@ -76,10 +76,7 @@ const PostJobScreen = ({ navigation }) => {
       return;
     }
 
-    // ✅ SAFE FALLBACK: Uses new API if available, falls back to string 'images' for older versions
-    const mediaType = ImagePicker.MediaType 
-      ? ImagePicker.MediaType.Images 
-      : 'images';
+    const mediaType = ImagePicker.MediaType ? ImagePicker.MediaType.Images : 'images';
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: mediaType,
@@ -197,19 +194,6 @@ const PostJobScreen = ({ navigation }) => {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Header Info */}
-          <View style={styles.headerInfo}>
-            <View style={styles.headerIconWrap}>
-              <Briefcase size={22} color={COLORS.primary || '#059669'} strokeWidth={2} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.headerTitle}>Post a New Job</Text>
-              <Text style={styles.headerSubtitle}>
-                Describe your project clearly to attract the perfect freelancer.
-              </Text>
-            </View>
-          </View>
-
           {/* Title */}
           <Card style={styles.section}>
             <View style={styles.labelRow}>
@@ -221,7 +205,6 @@ const PostJobScreen = ({ navigation }) => {
               placeholder="e.g. Senior React Native Developer"
               value={formData.title}
               onChangeText={(value) => updateField('title', value)}
-              error={errors.title}
             />
             {errors.title && (
               <View style={styles.errorRow}>
@@ -243,7 +226,6 @@ const PostJobScreen = ({ navigation }) => {
               placeholder="Describe the project, deliverables, and expectations..."
               value={formData.description}
               onChangeText={(value) => updateField('description', value)}
-              error={errors.description}
               multiline
               numberOfLines={6}
               style={styles.textArea}
@@ -305,24 +287,18 @@ const PostJobScreen = ({ navigation }) => {
               })}
             </View>
 
-            <View style={styles.budgetInputWrap}>
-              <Text style={styles.currencySymbol}>₦</Text>
-              <Input
-                placeholder="Enter amount"
-                value={formData.budget}
-                onChangeText={(value) => updateField('budget', value)}
-                keyboardType="numeric"
-                containerStyle={styles.budgetInputContainer}
-                style={styles.budgetInputInner}
-              />
-            </View>
+            <Input
+              placeholder="₦ Enter amount (leave empty for negotiable)"
+              value={formData.budget}
+              onChangeText={(value) => updateField('budget', value)}
+              keyboardType="numeric"
+            />
             {errors.budget && (
               <View style={styles.errorRow}>
                 <AlertCircle size={14} color={COLORS.error || '#EF4444'} />
                 <Text style={styles.errorText}>{errors.budget}</Text>
               </View>
             )}
-            <Text style={styles.helperText}>Leave empty for a negotiable budget</Text>
           </Card>
 
           {/* Location */}
@@ -331,16 +307,11 @@ const PostJobScreen = ({ navigation }) => {
               <MapPin size={16} color={COLORS.primary || '#059669'} strokeWidth={2} />
               <Text style={styles.labelText}>Location</Text>
             </View>
-            <View style={styles.locationInputWrap}>
-              <MapPin size={16} color={COLORS.textSecondary || '#64748B'} strokeWidth={2} style={styles.locationIcon} />
-              <Input
-                placeholder="e.g. Lagos, Nigeria or Remote"
-                value={formData.location}
-                onChangeText={(value) => updateField('location', value)}
-                containerStyle={styles.locationInputContainer}
-                style={styles.locationInputInner}
-              />
-            </View>
+            <Input
+              placeholder="e.g. Lagos, Nigeria or Remote"
+              value={formData.location}
+              onChangeText={(value) => updateField('location', value)}
+            />
           </Card>
 
           {/* Media Upload */}
@@ -401,7 +372,6 @@ const PostJobScreen = ({ navigation }) => {
                     disabled={linkLoading || !linkUrl.trim()}
                     variant="outline"
                     size="medium"
-                    fullWidth={false}
                     style={styles.linkAddBtn}
                   />
                 </View>
@@ -473,33 +443,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-  },
-  headerInfo: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 14,
-    marginBottom: 24,
-    paddingHorizontal: 4,
-  },
-  headerIconWrap: {
-    width: 44,
-    height: 44,
-    backgroundColor: COLORS.primaryLight || '#ECFDF5',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: COLORS.textPrimary || '#0F172A',
-    letterSpacing: -0.5,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary || '#64748B',
-    marginTop: 4,
-    lineHeight: 20,
   },
   section: {
     marginBottom: 16,
@@ -589,54 +532,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 10,
     right: 10,
-  },
-  budgetInputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: COLORS.borderLight || '#E2E8F0',
-    borderRadius: 12,
-    backgroundColor: COLORS.white || '#FFFFFF',
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  currencySymbol: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.textSecondary || '#64748B',
-    paddingLeft: 16,
-    paddingRight: 8,
-  },
-  budgetInputContainer: {
-    flex: 1,
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-  },
-  budgetInputInner: {
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-  },
-  locationInputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: COLORS.borderLight || '#E2E8F0',
-    borderRadius: 12,
-    backgroundColor: COLORS.white || '#FFFFFF',
-    overflow: 'hidden',
-  },
-  locationIcon: {
-    marginLeft: 14,
-    marginRight: 8,
-  },
-  locationInputContainer: {
-    flex: 1,
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-  },
-  locationInputInner: {
-    borderWidth: 0,
-    backgroundColor: 'transparent',
   },
   uploadZone: {
     borderWidth: 2,

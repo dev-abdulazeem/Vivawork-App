@@ -1,10 +1,14 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Animated } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 // Theme
 import { COLORS, SIZES } from '../constants/theme';
+
+// Context & API
+import { useAuth } from '../context/AuthContext';
+import api from '../utils/api';
 
 // Tab Screens
 import HomeScreen from '../screens/HomeScreen';
@@ -24,6 +28,9 @@ import EditProfileScreen from '../screens/EditProfileScreen';
 import SearchScreen from '../screens/SearchScreen';
 import AudioRoomsScreen from '../screens/AudioRoomsScreen';
 import AudioRoomDetailScreen from '../screens/AudioRoomDetailScreen';
+
+// 🎯 NEW: Find Freelancer Screen
+import FindFreelancerScreen from '../screens/FindFreelancerScreen';
 
 // 🎯 NEW: Contract Screens
 import ContractsScreen from '../screens/ContractsScreen';
@@ -81,8 +88,8 @@ const AnimatedTabIcon = ({ Icon, focused, color, size }) => {
   );
 };
 
-// 🎨 Custom Tab Bar with Slide-Up Entrance Animation
-const CustomTabBar = ({ state, descriptors, navigation }) => {
+// 🎨 Custom Tab Bar with Slide-Up Entrance Animation & Message Badge
+const CustomTabBar = ({ state, descriptors, navigation, unreadMessages = 0 }) => {
   const slideAnim = useRef(new Animated.Value(50)).current;
 
   useEffect(() => {
@@ -123,6 +130,7 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
           const color = isFocused ? COLORS.primary : COLORS.textTertiary;
           const tabConfig = TABS.find(t => t.name === route.name);
           const IconComponent = tabConfig ? tabConfig.icon : Home;
+          const isMessagesTab = route.name === 'Messages';
 
           return (
             <TouchableOpacity
@@ -136,12 +144,24 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
               style={styles.tabItem}
               activeOpacity={0.7}
             >
-              <AnimatedTabIcon 
-                Icon={IconComponent} 
-                focused={isFocused} 
-                color={color} 
-                size={22}
-              />
+              <View style={styles.iconContainer}>
+                <AnimatedTabIcon 
+                  Icon={IconComponent} 
+                  focused={isFocused} 
+                  color={color} 
+                  size={22}
+                />
+                
+                {/* 🎯 Message Badge Indicator */}
+                {isMessagesTab && unreadMessages > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>
+                      {unreadMessages > 99 ? '99+' : unreadMessages}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              
               <Text style={[styles.tabLabel, { color }]}>
                 {options.tabBarLabel !== undefined ? options.tabBarLabel : route.name}
               </Text>
@@ -155,9 +175,41 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
 
 // Bottom Tabs Navigator
 const MainTabs = () => {
+  const { isAuthenticated, user } = useAuth();
+  const [unreadMessages, setUnreadMessages] = useState(0);
+
+  useEffect(() => {
+    const fetchUnreadMessages = async () => {
+      // Only fetch if the user is logged in
+      if (!isAuthenticated || !user) {
+        setUnreadMessages(0);
+        return;
+      }
+      
+      try {
+        // 🎯 Fetch unread messages count from your backend
+        // Adjust the endpoint '/messages/unread-count' to match your actual API route
+        const response = await api.get('/messages/unread-count');
+        setUnreadMessages(response.data?.count || 0);
+      } catch (error) {
+        console.error('Failed to fetch unread messages:', error);
+        // Fallback to 0 on error so the badge doesn't get stuck
+        setUnreadMessages(0);
+      }
+    };
+
+    // Fetch immediately on mount
+    fetchUnreadMessages();
+
+    // Optional: Poll every 30 seconds to keep the badge updated in real-time
+    const interval = setInterval(fetchUnreadMessages, 30000);
+
+    return () => clearInterval(interval);
+  }, [isAuthenticated, user]);
+
   return (
     <Tab.Navigator
-      tabBar={(props) => <CustomTabBar {...props} />}
+      tabBar={(props) => <CustomTabBar {...props} unreadMessages={unreadMessages} />}
       screenOptions={{
         headerShown: false,
         tabBarHideOnKeyboard: true,
@@ -212,9 +264,20 @@ const MainNavigator = () => {
       />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       
-      {/* Jobs & Contracts */}
+      {/* Jobs & Freelancers */}
       <Stack.Screen name="JobDetail" component={JobDetailScreen} />
       <Stack.Screen name="PostJob" component={PostJobScreen} />
+      
+      {/* 🎯 NEW: Find Freelancer Route */}
+      <Stack.Screen 
+        name="FindFreelancer" 
+        component={FindFreelancerScreen} 
+        options={{ 
+          headerShown: true,
+          title: 'Find Freelancer',
+          headerBackTitle: 'Back'
+        }} 
+      />
       
       {/* 🎯 NEW: Added Contract Screens */}
       <Stack.Screen name="Contracts" component={ContractsScreen} />
@@ -254,6 +317,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 4,
+  },
+  iconContainer: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    backgroundColor: '#EF4444', // Standard red for notifications
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: COLORS.white,
+  },
+  badgeText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: '700',
   },
   tabLabel: {
     fontSize: 10,
