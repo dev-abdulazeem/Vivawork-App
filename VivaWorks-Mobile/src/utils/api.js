@@ -1,4 +1,3 @@
-// src/utils/api.js
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CONFIG from '../constants/config';
@@ -6,7 +5,7 @@ import CONFIG from '../constants/config';
 // Create axios instance
 const api = axios.create({
   baseURL: CONFIG.API_URL,
-  timeout: CONFIG.API_TIMEOUT,
+  timeout: CONFIG.API_TIMEOUT || 30000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -18,7 +17,6 @@ const api = axios.create({
 api.interceptors.request.use(
   async (config) => {
     try {
-      // FIX: Safe fallback to prevent undefined key errors
       const storageKeys = CONFIG?.STORAGE_KEYS || {};
       const tokenKey = storageKeys.AUTH_TOKEN || '@vivaworks_auth_token';
       
@@ -35,121 +33,45 @@ api.interceptors.request.use(
 );
 
 // ============================================
-// Refresh token state (shared across all requests)
-// ============================================
-let isRefreshing = false;
-let failedQueue = [];
-
-const processQueue = (error, token = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token);
-    }
-  });
-  failedQueue = [];
-};
-
-// Endpoints that must NEVER trigger a refresh retry
-const AUTH_ENDPOINTS = [
-  '/auth/login',
-  '/auth/register',
-  '/auth/verify-email',
-  '/auth/refresh',
-  '/auth/logout',
-  '/auth/forgot-password',
-  '/auth/reset-password',
-];
-
-// ============================================
-// Response interceptor - refresh expired tokens
+// Response interceptor - Handle errors cleanly
 // ============================================
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config || {};
 
-    // Network error (offline, server down) — no response object
+    // 1. Handle Network Errors (Offline, Server Down, or Timeout)
     if (!error.response) {
       return Promise.reject({
         ...error,
-        friendlyMessage: 'Network error. Please check your internet connection.',
+        friendlyMessage: 'Network error. Please check your internet connection or backend server.',
       });
     }
 
-    const requestUrl = originalRequest.url || '';
-    const isAuthEndpoint = AUTH_ENDPOINTS.some((ep) => requestUrl.includes(ep));
+    // 2. Handle Expired Tokens (401 Unauthorized)
+    // Instead of trying to refresh (which causes the 404 error), 
+    // we just clear the storage and tell the app the session is dead.
+    if (error.response.status === 401) {
+      const storageKeys = CONFIG?.STORAGE_KEYS || {};
+      
+      // Clear all auth-related data from storage
+      await AsyncStorage.multiRemove([
+        storageKeys.AUTH_TOKEN || '@vivaworks_auth_token',
+        storageKeys.REFRESH_TOKEN || '@vivaworks_refresh_token',
+        storageKeys.USER_DATA || '@vivaworks_user_data',
+      ]);
 
-    // Token expired -> try to refresh it ONCE, then retry the original request
-    if (error.response.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
-      // Another request is already refreshing — queue this one
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-            return api(originalRequest);
-          })
-          .catch((err) => Promise.reject(err));
-      }
+      // Clear default headers so subsequent requests don't use the bad token
+      delete api.defaults.headers.common.Authorization;
 
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      try {
-        // FIX: Safe fallback for refresh token key
-        const storageKeys = CONFIG?.STORAGE_KEYS || {};
-        const refreshTokenKey = storageKeys.REFRESH_TOKEN || '@vivaworks_refresh_token';
-        const authTokenKey = storageKeys.AUTH_TOKEN || '@vivaworks_auth_token';
-
-        const refreshToken = await AsyncStorage.getItem(refreshTokenKey);
-        if (!refreshToken) {
-          throw new Error('No refresh token stored');
-        }
-
-        // IMPORTANT: raw axios call, NOT `api`, so interceptors don't loop
-        const { data } = await axios.post(`${CONFIG.API_URL}/auth/refresh`, {
-          refreshToken,
-        });
-
-        const { accessToken } = data;
-        const storageSets = [[authTokenKey, accessToken]];
-
-        // Save rotated refresh token if the backend issues a new one
-        if (data.refreshToken) {
-          storageSets.push([refreshTokenKey, data.refreshToken]);
-        }
-
-        await AsyncStorage.multiSet(storageSets);
-        api.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
-        processQueue(null, accessToken);
-
-        // Retry the original request with the new token
-        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-        return api(originalRequest);
-      } catch (refreshError) {
-        processQueue(refreshError, null);
-        
-        // FIX: Safe fallback for multiRemove
-        const storageKeys = CONFIG?.STORAGE_KEYS || {};
-        await AsyncStorage.multiRemove([
-          storageKeys.AUTH_TOKEN || '@vivaworks_auth_token',
-          storageKeys.REFRESH_TOKEN || '@vivaworks_refresh_token',
-          storageKeys.USER_DATA || '@vivaworks_user_data',
-        ]);
-
-        return Promise.reject({
-          ...error,
-          code: 'SESSION_EXPIRED',
-          friendlyMessage: 'Session expired. Please log in again.',
-        });
-      } finally {
-        isRefreshing = false;
-      }
+      return Promise.reject({
+        ...error,
+        code: 'SESSION_EXPIRED',
+        friendlyMessage: 'Session expired. Please log in again.',
+      });
     }
 
+    // 3. Handle all other backend errors
     const errorMessage =
       error.response?.data?.message ||
       error.response?.data?.error ||

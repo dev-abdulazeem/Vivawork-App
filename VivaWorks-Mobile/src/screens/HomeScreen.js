@@ -16,6 +16,7 @@ import {
   Platform,
   Clipboard,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
@@ -31,7 +32,7 @@ import {
   X,
   Send,
   Image as ImageIcon,
-  Video,
+  Video as VideoIcon,
   Link as LinkIcon,
   FileText,
   MoreHorizontal,
@@ -43,8 +44,6 @@ import {
   AlertCircle,
   RefreshCw,
   Trash2,
-  Volume2,
-  VolumeX,
   Search,
   Copy,
   Check,
@@ -55,7 +54,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const POST_TYPES = {
   text: { icon: FileText, label: 'Text' },
   image: { icon: ImageIcon, label: 'Image' },
-  video: { icon: Video, label: 'Video' },
+  video: { icon: VideoIcon, label: 'Video' },
   link: { icon: LinkIcon, label: 'Link' },
 };
 
@@ -83,7 +82,6 @@ const getInitials = (firstName, lastName) => {
 const HomeScreen = ({ navigation }) => {
   const { user } = useAuth();
   
-  // Feed State
   const [posts, setPosts] = useState([]);
   const [stories, setStories] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -93,7 +91,6 @@ const HomeScreen = ({ navigation }) => {
   const [totalPages, setTotalPages] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // Create Post State
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newPostContent, setNewPostContent] = useState('');
   const [postType, setPostType] = useState('text');
@@ -101,14 +98,12 @@ const HomeScreen = ({ navigation }) => {
   const [linkPreview, setLinkPreview] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Comments State
   const [expandedComments, setExpandedComments] = useState({});
   const [commentInputs, setCommentInputs] = useState({});
   const [postingComment, setPostingComment] = useState({});
   const [replyingTo, setReplyingTo] = useState(null);
   const [replyInputs, setReplyInputs] = useState({});
 
-  // Share State
   const [shareModalPost, setShareModalPost] = useState(null);
   const [shareLink, setShareLink] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -117,22 +112,15 @@ const HomeScreen = ({ navigation }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [sendingToUser, setSendingToUser] = useState(null);
 
-  // Lightbox State
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxImages, setLightboxImages] = useState([]);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
-  // Video State
-  const [playingVideo, setPlayingVideo] = useState(null);
-  const [videoMuted, setVideoMuted] = useState(true);
-
-  // Story Viewer State
   const [selectedStory, setSelectedStory] = useState(null);
   const [storyIndex, setStoryIndex] = useState(0);
   const [storyProgress, setStoryProgress] = useState(0);
   const storyTimerRef = useRef(null);
 
-  // ─── FETCH DATA ───────────────────────────────────────────────────────
   const fetchFeed = useCallback(async (pageNum = 1, append = false) => {
     try {
       if (!append) {
@@ -183,7 +171,6 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  // ─── TRACK IMPRESSIONS ────────────────────────────────────────────────
   useEffect(() => {
     if (!posts.length || !user?.id) return;
     const timer = setTimeout(() => {
@@ -196,7 +183,6 @@ const HomeScreen = ({ navigation }) => {
     return () => clearTimeout(timer);
   }, [posts, user?.id]);
 
-  // ─── STORY VIEWER LOGIC ───────────────────────────────────────────────
   const openStory = (story) => {
     setSelectedStory(story);
     setStoryIndex(0);
@@ -236,7 +222,6 @@ const HomeScreen = ({ navigation }) => {
     return () => clearInterval(storyTimerRef.current);
   }, [selectedStory, storyIndex, goToNextStoryPost]);
 
-  // ─── POST ACTIONS ─────────────────────────────────────────────────────
   const handleLike = async (postId) => {
     const post = posts.find((p) => p.id === postId);
     if (!post) return;
@@ -281,7 +266,6 @@ const HomeScreen = ({ navigation }) => {
     ]);
   };
 
-  // ─── COMMENTS & REPLIES ───────────────────────────────────────────────
   const fetchComments = async (postId) => {
     try {
       const response = await api.get(`/posts/${postId}/comments`);
@@ -349,7 +333,6 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  // ─── SHARE & SEARCH ───────────────────────────────────────────────────
   const openShareModal = async (post) => {
     setShareModalPost(post);
     setShareLink('');
@@ -375,7 +358,6 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const copyShareLink = () => {
-    // 🎯 Clean, professional domain (change to localhost or your actual domain as needed)
     Clipboard.setString(`https://vivaworks.com/share/${shareLink}`);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
@@ -417,7 +399,6 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  // ─── CREATE POST ──────────────────────────────────────────────────────
   const handleCreatePost = async () => {
     if (postType === 'text' && !newPostContent.trim()) {
       Alert.alert('Error', 'Please enter some content');
@@ -456,7 +437,6 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  // Link preview debounce
   useEffect(() => {
     if (postType !== 'link' || !linkUrl) return;
     const timeout = setTimeout(async () => {
@@ -470,7 +450,13 @@ const HomeScreen = ({ navigation }) => {
     return () => clearTimeout(timeout);
   }, [linkUrl, postType]);
 
-  // ─── RENDER HELPERS ───────────────────────────────────────────────────
+  const openVideoInNativePlayer = (videoUrl) => {
+    Linking.openURL(videoUrl).catch((err) => {
+      console.error('Failed to open video:', err);
+      Alert.alert('Error', 'Could not open video. Please try again.');
+    });
+  };
+
   const renderAvatar = (uri, firstName, lastName, size = 40) => {
     if (uri) {
       return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
@@ -488,7 +474,7 @@ const HomeScreen = ({ navigation }) => {
         horizontal
         showsHorizontalScrollIndicator={false}
         data={[{ isCreate: true }, ...stories]}
-        keyExtractor={(item, index) => item.userId || `create-${index}`}
+        keyExtractor={(item, index) => `${item.userId || 'create'}-${index}`}
         contentContainerStyle={styles.storiesContent}
         renderItem={({ item }) => {
           if (item.isCreate) {
@@ -519,7 +505,6 @@ const HomeScreen = ({ navigation }) => {
 
   const renderPost = ({ item: post }) => (
     <View style={styles.postCard}>
-      {/* Header */}
       <View style={styles.postHeader}>
         <TouchableOpacity
           style={styles.postHeaderLeft}
@@ -551,7 +536,6 @@ const HomeScreen = ({ navigation }) => {
         </View>
       </View>
 
-      {/* Content */}
       <View style={styles.postContent}>
         {post.content && <Text style={styles.postText}>{post.content}</Text>}
 
@@ -559,7 +543,7 @@ const HomeScreen = ({ navigation }) => {
           <View style={[styles.mediaGrid, post.media.length === 1 && styles.mediaGridSingle]}>
             {post.media.slice(0, 4).map((url, idx) => (
               <TouchableOpacity
-                key={idx}
+                key={`media-${url}-${idx}`}
                 style={[
                   styles.mediaItem,
                   post.media.length === 1 && styles.mediaItemSingle,
@@ -586,21 +570,18 @@ const HomeScreen = ({ navigation }) => {
         {post.type === 'video' && post.media?.length > 0 && (
           <TouchableOpacity
             style={styles.videoContainer}
-            onPress={() => setPlayingVideo(playingVideo === post.id ? null : post.id)}
-            activeOpacity={0.9}
+            onPress={() => openVideoInNativePlayer(post.media[0])}
+            activeOpacity={0.85}
           >
             <Image source={{ uri: post.media[0] }} style={styles.videoThumbnail} resizeMode="cover" />
-            {playingVideo !== post.id && (
-              <View style={styles.videoPlayOverlay}>
-                <View style={styles.videoPlayButton}>
-                  <Play size={32} color="#fff" fill="#fff" />
-                </View>
+            <View style={styles.videoPlayOverlay}>
+              <View style={styles.videoPlayButton}>
+                <Play size={32} color="#fff" fill="#fff" />
               </View>
-            )}
-            <View style={styles.videoControls}>
-              <TouchableOpacity onPress={() => setVideoMuted(!videoMuted)} style={styles.videoControlBtn}>
-                {videoMuted ? <VolumeX size={20} color="#fff" /> : <Volume2 size={20} color="#fff" />}
-              </TouchableOpacity>
+            </View>
+            <View style={styles.videoDurationBadge}>
+              <VideoIcon size={12} color="#fff" />
+              <Text style={styles.videoDurationText}>Tap to play</Text>
             </View>
           </TouchableOpacity>
         )}
@@ -630,7 +611,6 @@ const HomeScreen = ({ navigation }) => {
         )}
       </View>
 
-      {/* Actions */}
       <View style={styles.postActions}>
         <View style={styles.postActionsLeft}>
           <TouchableOpacity style={styles.actionButton} onPress={() => handleLike(post.id)} activeOpacity={0.6}>
@@ -651,13 +631,12 @@ const HomeScreen = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Comments Section */}
       {expandedComments[post.id] && (
         <View style={styles.commentsSection}>
           <View style={styles.commentsList}>
             {post.commentsList?.length > 0 ? (
-              post.commentsList.map((comment) => (
-                <View key={comment.id} style={styles.commentItem}>
+              post.commentsList.map((comment, cIndex) => (
+                <View key={`comment-${comment.id || 'no-id'}-${cIndex}`} style={styles.commentItem}>
                   <TouchableOpacity
                     style={styles.commentAvatarWrap}
                     onPress={() => navigation.navigate('UserProfile', { userId: comment.user?.id })}
@@ -692,7 +671,6 @@ const HomeScreen = ({ navigation }) => {
                       )}
                     </View>
 
-                    {/* Reply Input */}
                     {replyingTo === comment.id && (
                       <View style={styles.replyInputContainer}>
                         <TextInput
@@ -717,11 +695,10 @@ const HomeScreen = ({ navigation }) => {
                       </View>
                     )}
 
-                    {/* Nested Replies */}
                     {comment.replies && comment.replies.length > 0 && (
                       <View style={styles.repliesContainer}>
-                        {comment.replies.map((reply) => (
-                          <View key={reply.id} style={styles.replyItem}>
+                        {comment.replies.map((reply, rIndex) => (
+                          <View key={`reply-${reply.id || 'no-id'}-${rIndex}`} style={styles.replyItem}>
                             <TouchableOpacity
                               style={styles.commentAvatarWrap}
                               onPress={() => navigation.navigate('UserProfile', { userId: reply.user?.id })}
@@ -752,7 +729,6 @@ const HomeScreen = ({ navigation }) => {
             )}
           </View>
 
-          {/* Main Comment Input */}
           <View style={styles.mainCommentInput}>
             {renderAvatar(user?.avatar, user?.firstName, user?.lastName, 32)}
             <View style={styles.commentInputBox}>
@@ -814,11 +790,6 @@ const HomeScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* 🎯 Clean Header: Removed the duplicate "+" button */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Feed</Text>
-      </View>
-
       {error && (
         <View style={styles.errorBanner}>
           <AlertCircle size={18} color="#EF4444" />
@@ -832,7 +803,7 @@ const HomeScreen = ({ navigation }) => {
       <FlatList
         data={posts}
         renderItem={renderPost}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item, index) => `${item.id}-${index}`}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#059669" />}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
@@ -858,19 +829,15 @@ const HomeScreen = ({ navigation }) => {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* 🎯 Premium Floating Action Button: Perfectly anchored bottom-right */}
       <TouchableOpacity style={styles.fab} onPress={() => setShowCreateModal(true)} activeOpacity={0.85}>
         <Plus size={28} color="#fff" strokeWidth={2.5} />
       </TouchableOpacity>
 
-      {/* ─── MODALS ─────────────────────────────────────────────────────── */}
-      
-      {/* 1. Story Viewer Modal */}
       <Modal visible={!!selectedStory} transparent animationType="fade" onRequestClose={closeStory}>
         <View style={styles.storyModalContainer}>
           <View style={styles.storyProgressContainer}>
             {selectedStory?.posts.map((_, idx) => (
-              <View key={idx} style={styles.storyProgressBarBg}>
+              <View key={`story-progress-${idx}`} style={styles.storyProgressBarBg}>
                 <View
                   style={[
                     styles.storyProgressBarFill,
@@ -915,7 +882,6 @@ const HomeScreen = ({ navigation }) => {
         </View>
       </Modal>
 
-      {/* 2. Create Post Modal */}
       <Modal visible={showCreateModal} transparent animationType="slide" onRequestClose={() => setShowCreateModal(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContainer}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowCreateModal(false)} />
@@ -970,7 +936,7 @@ const HomeScreen = ({ navigation }) => {
                   const isActive = postType === type;
                   return (
                     <TouchableOpacity
-                      key={type}
+                      key={`post-type-${type}`}
                       style={[styles.postTypeBtn, isActive && styles.postTypeBtnActive]}
                       onPress={() => {
                         setPostType(type);
@@ -997,7 +963,6 @@ const HomeScreen = ({ navigation }) => {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* 3. Share Modal */}
       <Modal visible={!!shareModalPost} transparent animationType="fade" onRequestClose={closeShareModal}>
         <View style={styles.modalContainer}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={closeShareModal} />
@@ -1045,9 +1010,9 @@ const HomeScreen = ({ navigation }) => {
 
                 {!isSearching && searchResults.length > 0 && (
                   <View style={styles.searchResults}>
-                    {searchResults.map((result) => (
+                    {searchResults.map((result, sIndex) => (
                       <TouchableOpacity
-                        key={result.id}
+                        key={`search-${result.id || 'no-id'}-${sIndex}`}
                         style={styles.searchResultItem}
                         onPress={() => sendPostToUser(result.id)}
                         disabled={sendingToUser === result.id}
@@ -1078,7 +1043,6 @@ const HomeScreen = ({ navigation }) => {
         </View>
       </Modal>
 
-      {/* 4. Lightbox Modal */}
       <Modal visible={lightboxOpen} transparent animationType="fade" onRequestClose={() => setLightboxOpen(false)}>
         <View style={styles.lightboxContainer}>
           <TouchableOpacity style={styles.lightboxClose} onPress={() => setLightboxOpen(false)}>
@@ -1102,7 +1066,7 @@ const HomeScreen = ({ navigation }) => {
           {lightboxImages.length > 1 && (
             <View style={styles.lightboxDots}>
               {lightboxImages.map((_, idx) => (
-                <View key={idx} style={[styles.lightboxDot, idx === lightboxIndex && styles.lightboxDotActive]} />
+                <View key={`lightbox-dot-${idx}`} style={[styles.lightboxDot, idx === lightboxIndex && styles.lightboxDotActive]} />
               ))}
             </View>
           )}
@@ -1117,20 +1081,6 @@ const styles = StyleSheet.create({
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' },
   loadingText: { marginTop: 12, fontSize: 14, color: '#6B7280' },
   
-  // Header
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center', // 🎯 Centered for a cleaner look
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#111827', letterSpacing: -0.5 },
-
-  // Error Banner
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1143,13 +1093,11 @@ const styles = StyleSheet.create({
   },
   errorText: { flex: 1, fontSize: 14, color: '#EF4444', fontWeight: '500' },
 
-  // List
-  listContent: { paddingBottom: 100 }, // 🎯 Extra padding so FAB doesn't cover the last post
+  listContent: { paddingBottom: 100 },
   loadingMore: { paddingVertical: 20, alignItems: 'center' },
   endOfFeed: { paddingVertical: 20, alignItems: 'center' },
   endOfFeedText: { fontSize: 14, color: '#9CA3AF' },
 
-  // Stories
   storiesContainer: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F3F4F6', paddingVertical: 16 },
   storiesContent: { paddingHorizontal: 16, gap: 16 },
   storyItem: { alignItems: 'center', width: 72 },
@@ -1161,7 +1109,6 @@ const styles = StyleSheet.create({
   },
   storyName: { fontSize: 11, color: '#374151', marginTop: 8, textAlign: 'center', fontWeight: '500' },
 
-  // Post Card
   postCard: {
     backgroundColor: '#fff', marginHorizontal: 16, marginTop: 12, borderRadius: 16,
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
@@ -1175,11 +1122,9 @@ const styles = StyleSheet.create({
   postHeaderRight: { flexDirection: 'row', alignItems: 'center' },
   postActionBtn: { padding: 8, marginLeft: 4 },
 
-  // Post Content
   postContent: { paddingHorizontal: 16 },
   postText: { fontSize: 15, lineHeight: 22, color: '#1F2937', marginBottom: 12 },
   
-  // Media
   mediaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 2, borderRadius: 12, overflow: 'hidden', marginBottom: 12 },
   mediaGridSingle: { flexDirection: 'column' },
   mediaItem: { width: '49%', aspectRatio: 1, position: 'relative' },
@@ -1189,15 +1134,17 @@ const styles = StyleSheet.create({
   mediaOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   mediaOverlayText: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
 
-  // Video
   videoContainer: { borderRadius: 12, overflow: 'hidden', marginBottom: 12, position: 'relative', aspectRatio: 16 / 9, backgroundColor: '#000' },
   videoThumbnail: { width: '100%', height: '100%' },
   videoPlayOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
   videoPlayButton: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(255,255,255,0.9)', justifyContent: 'center', alignItems: 'center' },
-  videoControls: { position: 'absolute', bottom: 12, right: 12, flexDirection: 'row' },
-  videoControlBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+  videoDurationBadge: {
+    position: 'absolute', bottom: 12, left: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+  },
+  videoDurationText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
-  // Link
   linkCard: { borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden', marginBottom: 12 },
   linkImage: { width: '100%', height: 160, backgroundColor: '#F3F4F6' },
   linkContent: { padding: 12 },
@@ -1206,14 +1153,12 @@ const styles = StyleSheet.create({
   linkDomain: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
   linkDomainText: { fontSize: 12, color: '#059669' },
 
-  // Actions
   postActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   postActionsLeft: { flexDirection: 'row', alignItems: 'center', gap: 24 },
   actionButton: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   actionText: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
   actionTextActive: { color: '#EF4444' },
 
-  // Comments
   commentsSection: { backgroundColor: '#F9FAFB', borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   commentsList: { padding: 16 },
   commentItem: { flexDirection: 'row', marginBottom: 16 },
@@ -1229,47 +1174,30 @@ const styles = StyleSheet.create({
   commentActionText: { fontSize: 12, fontWeight: '600', color: '#059669' },
   noComments: { textAlign: 'center', color: '#9CA3AF', fontSize: 14, paddingVertical: 16 },
 
-  // Reply
   replyInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8, marginTop: 8, borderWidth: 1, borderColor: '#E5E7EB' },
   replyInput: { flex: 1, fontSize: 13, color: '#111827', maxHeight: 60 },
   replySendBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#059669', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
   repliesContainer: { marginTop: 12, marginLeft: 4, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: '#E5E7EB' },
   replyItem: { flexDirection: 'row', marginBottom: 12 },
 
-  // Main Comment Input
   mainCommentInput: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingBottom: 16, gap: 10 },
   commentInputBox: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#fff', borderRadius: 24, paddingHorizontal: 4, paddingVertical: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3, elevation: 1, borderWidth: 1, borderColor: '#E5E7EB' },
   commentInputField: { flex: 1, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, color: '#111827', maxHeight: 100 },
   commentSendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#059669', justifyContent: 'center', alignItems: 'center', marginRight: 4 },
   commentSendBtnDisabled: { backgroundColor: '#D1D5DB' },
 
-  // Empty State
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60, paddingHorizontal: 32 },
   emptyStateTitle: { fontSize: 18, fontWeight: '600', color: '#111827', marginTop: 16, marginBottom: 8 },
   emptyStateMessage: { fontSize: 14, color: '#6B7280', textAlign: 'center', lineHeight: 20, marginBottom: 20 },
   emptyStateButton: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#059669', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
   emptyStateButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
 
-  // 🎯 Premium Floating Action Button
   fab: {
-    position: 'absolute', 
-    right: 24, 
-    bottom: 24, 
-    width: 60, 
-    height: 60, 
-    borderRadius: 30,
-    backgroundColor: '#059669', 
-    justifyContent: 'center', 
-    alignItems: 'center',
-    shadowColor: '#059669', // 🎯 Colored shadow for a premium glow effect
-    shadowOffset: { width: 0, height: 6 }, 
-    shadowOpacity: 0.3, 
-    shadowRadius: 10, 
-    elevation: 10, 
-    zIndex: 100,
+    position: 'absolute', right: 24, bottom: 24, width: 60, height: 60, borderRadius: 30,
+    backgroundColor: '#059669', justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#059669', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 10, zIndex: 100,
   },
 
-  // Story Modal
   storyModalContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center' },
   storyProgressContainer: { position: 'absolute', top: 50, left: 16, right: 16, flexDirection: 'row', gap: 4, zIndex: 10 },
   storyProgressBarBg: { flex: 1, height: 3, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden' },
@@ -1286,7 +1214,6 @@ const styles = StyleSheet.create({
   storyTextCard: { backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 },
   storyTextContent: { fontSize: 18, color: '#111827', lineHeight: 26, textAlign: 'center' },
 
-  // Generic Modal
   modalContainer: { flex: 1, justifyContent: 'flex-end' },
   modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 20, paddingBottom: Platform.OS === 'ios' ? 40 : 24, maxHeight: '90%' },
@@ -1299,7 +1226,6 @@ const styles = StyleSheet.create({
   modalVisibilityText: { fontSize: 12, color: '#6B7280' },
   modalInput: { fontSize: 17, color: '#111827', minHeight: 100, textAlignVertical: 'top', marginBottom: 16 },
   
-  // Link Input in Modal
   linkInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   linkInputIcon: { marginRight: 8 },
   linkInput: { flex: 1, fontSize: 15, color: '#111827' },
@@ -1315,7 +1241,6 @@ const styles = StyleSheet.create({
   modalSubmitDisabled: { backgroundColor: '#D1D5DB' },
   modalSubmitText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 
-  // Share Modal Specifics
   shareSection: { marginBottom: 20 },
   shareSectionTitle: { fontSize: 14, fontWeight: '600', color: '#111827', marginBottom: 10 },
   shareLinkBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#E5E7EB' },
@@ -1333,7 +1258,6 @@ const styles = StyleSheet.create({
   searchResultHeadline: { fontSize: 12, color: '#6B7280', marginTop: 2 },
   emptySearchText: { textAlign: 'center', color: '#9CA3AF', fontSize: 14, paddingVertical: 20 },
 
-  // Lightbox
   lightboxContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
   lightboxClose: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 8 },
   lightboxImage: { width: SCREEN_WIDTH, height: '80%' },
@@ -1344,7 +1268,6 @@ const styles = StyleSheet.create({
   lightboxDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.4)' },
   lightboxDotActive: { backgroundColor: '#fff' },
 
-  // Avatar Placeholder
   avatarPlaceholder: { backgroundColor: '#059669', justifyContent: 'center', alignItems: 'center' },
   avatarText: { color: '#fff', fontWeight: '700' },
 });
